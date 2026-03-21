@@ -1,0 +1,5 @@
+{
+  "name": "JW Finder Dashboard",
+  "description": "A black and green themed dashboard for JW Finder with balance, active users, and slot management.",
+  "requestFramePermissions": []
+}
