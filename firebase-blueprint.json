@@ -1,0 +1,25 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and balance information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "username": { "type": "string", "description": "Display name" },
+        "balance": { "type": "number", "description": "Current balance" },
+        "activeSlot": { "type": "object", "description": "Active plan slot" },
+        "depositsCount": { "type": "number", "description": "Number of deposits" },
+        "createdAt": { "type": "number", "description": "Creation timestamp" },
+        "lastLogin": { "type": "number", "description": "Last login timestamp" }
+      },
+      "required": ["uid", "balance", "depositsCount", "createdAt", "lastLogin"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": { "$ref": "User" },
+      "description": "User profile document"
+    }
+  }
+}

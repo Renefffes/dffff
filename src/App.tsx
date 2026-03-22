@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { Key, LogOut, User, Users, Wallet, ArrowDownToLine, Activity, Eye, X, Clock } from 'lucide-react';
 import { useUser, SignInButton, SignOutButton, UserButton } from '@clerk/clerk-react';
-import { loadUserData, saveUserData, logActivity as logActivityLocal, UserData } from './localStorageService';
+import { db } from './firebase';
+import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { logActivity as logActivityLocal } from './localStorageService';
 
 interface ActiveUser {
   username: string;
@@ -57,25 +59,30 @@ export default function App() {
 
   useEffect(() => {
     if (isLoaded && isSignedIn && user) {
-      const loadData = () => {
+      const loadData = async () => {
         try {
-          const data = loadUserData(user.id);
+          const userDocRef = doc(db, 'users', user.id);
+          const userDoc = await getDoc(userDocRef);
           
-          if (data) {
+          if (userDoc.exists()) {
+            const data = userDoc.data();
             setBalance(data.balance);
-            setActiveSlot(data.activeSlot);
-            setDepositsCount(data.depositsCount);
+            setActiveSlot(data.activeSlot || null);
+            setDepositsCount(data.depositsCount || 0);
           } else {
             // Initialize user
-            saveUserData(user.id, {
+            const userData = {
               username: user.username || user.firstName || 'User',
               balance: 0.00,
               activeSlot: null,
               depositsCount: 0,
               createdAt: Date.now(),
               lastLogin: Date.now(),
-              activity: []
-            });
+            };
+            await setDoc(userDocRef, userData);
+            setBalance(0.00);
+            setActiveSlot(null);
+            setDepositsCount(0);
           }
           logActivity('login', { username: user.username || user.firstName || 'User' });
           setIsFirebaseLoaded(true);
@@ -99,18 +106,22 @@ export default function App() {
       .catch(err => console.error("Failed to fetch purchase status", err));
   }, [isLoaded, isSignedIn, user]);
 
-  // Update balance in localStorage whenever it changes
+  // Update balance in Firestore whenever it changes
   useEffect(() => {
     if (user && isFirebaseLoaded) {
-      const data = loadUserData(user.id);
-      if (data) {
-        saveUserData(user.id, {
-          ...data,
-          balance,
-          activeSlot,
-          depositsCount
-        });
-      }
+      const updateData = async () => {
+        try {
+          const userDocRef = doc(db, 'users', user.id);
+          await updateDoc(userDocRef, {
+            balance,
+            activeSlot,
+            depositsCount
+          });
+        } catch (e) {
+          console.error("Failed to save user data", e);
+        }
+      };
+      updateData();
     }
   }, [balance, activeSlot, depositsCount, user, isFirebaseLoaded]);
 
