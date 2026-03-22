@@ -715,13 +715,13 @@ export default function App() {
                   <div className="text-sm font-medium text-zinc-500 mb-2">Hours</div>
                   <div className="flex items-center gap-3">
                     <button 
-                      onClick={() => setPurchaseHours(Math.max(1, purchaseHours - 1))}
-                      className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                      disabled
+                      className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-600 cursor-not-allowed"
                     >-</button>
-                    <span className="text-lg font-semibold text-white w-8 text-center">{purchaseHours}</span>
+                    <span className="text-lg font-semibold text-white w-8 text-center">1</span>
                     <button 
-                      onClick={() => setPurchaseHours(purchaseHours + 1)}
-                      className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-300 hover:bg-zinc-700 hover:text-white transition-colors"
+                      disabled
+                      className="w-8 h-8 rounded-lg bg-zinc-800 flex items-center justify-center text-zinc-600 cursor-not-allowed"
                     >+</button>
                   </div>
                 </div>
