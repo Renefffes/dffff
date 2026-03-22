@@ -32,5 +32,13 @@ service cloud.firestore {
     match /transactions/{transactionId} {
       allow read, write: if true; // INSECURE: Relaxed for Clerk prototype
     }
+
+    match /settings/{docId} {
+      allow read, write: if true; // INSECURE: Relaxed for Clerk prototype
+    }
+
+    match /purchaseLogs/{logId} {
+      allow read, write: if true; // INSECURE: Relaxed for Clerk prototype
+    }
   }
 }

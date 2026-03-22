@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import AdminTab from './components/AdminTab';
 import RedParticles from './components/RedParticles';
-import { Key, LogOut, User, Users, Wallet, ArrowDownToLine, Activity, Eye, X, Clock, Settings, Music, Sparkles } from 'lucide-react';
+import { Key, LogOut, User, Users, Wallet, ArrowDownToLine, Activity, Eye, X, Clock, Settings, Music, Sparkles, Pause } from 'lucide-react';
 import { useUser, SignInButton, SignOutButton, UserButton } from '@clerk/clerk-react';
 import { db } from './firebase';
-import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, onSnapshot, query } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, onSnapshot, query, getDocs } from 'firebase/firestore';
 import { logActivity as logActivityLocal } from './localStorageService';
 
 interface ActiveUser {
@@ -20,6 +20,8 @@ interface ActiveSlot {
   plan: string;
   expiresAt: number;
   key: string;
+  paused?: boolean;
+  remainingTime?: number;
 }
 
 export default function App() {
@@ -35,7 +37,7 @@ export default function App() {
   const [adminBalance, setAdminBalance] = useState('');
   const [removeBalanceUserId, setRemoveBalanceUserId] = useState('');
   const [removeBalanceAmount, setRemoveBalanceAmount] = useState('');
-  const [purchasesEnabled, setPurchasesEnabled] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
   const [selectedPlan, setSelectedPlan] = useState<'Ultra' | 'Normal' | null>(null);
   const [purchaseHours, setPurchaseHours] = useState(1);
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
@@ -47,9 +49,12 @@ export default function App() {
   const [globalNormalCount, setGlobalNormalCount] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [isFirebaseLoaded, setIsFirebaseLoaded] = useState(false);
+  const [botCount, setBotCount] = useState(0);
   const [showParticles, setShowParticles] = useState(() => localStorage.getItem('showParticles') !== 'false');
   const [playMusic, setPlayMusic] = useState(() => localStorage.getItem('playMusic') === 'true');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const settingsRef = useRef<HTMLDivElement>(null);
   const [depositsCount, setDepositsCount] = useState(() => {
     const saved = localStorage.getItem('depositsCount');
     return saved ? parseInt(saved, 10) : 0;
@@ -73,103 +78,84 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('playMusic', playMusic.toString());
-    const audio = document.getElementById('bg-music') as HTMLAudioElement;
-    if (audio) {
+    if (audioRef.current) {
       if (playMusic) {
-        audio.play().catch(e => console.log("Audio play failed:", e));
+        audioRef.current.play().catch(e => console.log("Audio play failed:", e));
       } else {
-        audio.pause();
+        audioRef.current.pause();
       }
     }
   }, [playMusic]);
 
   useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
+    const handleClickOutside = (event: MouseEvent | TouchEvent) => {
       const target = event.target as HTMLElement;
-      if (!target.closest('#settings-menu')) {
+      if (settingsRef.current && !settingsRef.current.contains(target)) {
         setIsSettingsOpen(false);
       }
     };
     if (isSettingsOpen) {
       document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('touchstart', handleClickOutside);
     }
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('touchstart', handleClickOutside);
     };
   }, [isSettingsOpen]);
 
   useEffect(() => {
+    const settingsRef = doc(db, 'settings', 'global');
+    const unsubscribe = onSnapshot(settingsRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        setBotCount(data.botCount || 0);
+        setIsPaused(data.isPaused || false);
+      } else {
+        setDoc(settingsRef, { botCount: 0, isPaused: false });
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     if (isLoaded && isSignedIn && user) {
-      const loadData = async () => {
-        try {
-          const userDocRef = doc(db, 'users', user.id);
-          const userDoc = await getDoc(userDocRef);
-          
-          if (userDoc.exists()) {
-            const data = userDoc.data();
-            setBalance(data.balance);
-            setActiveSlot(data.activeSlot || null);
-            setDepositsCount(data.depositsCount || 0);
-          } else {
-            // Initialize user
-            const userData = {
-              username: user.username || user.firstName || 'User',
-              balance: 0.00,
-              activeSlot: null,
-              depositsCount: 0,
-              createdAt: Date.now(),
-              lastLogin: Date.now(),
-            };
-            await setDoc(userDocRef, userData);
-            setBalance(0.00);
-            setActiveSlot(null);
-            setDepositsCount(0);
-          }
+      const userDocRef = doc(db, 'users', user.id);
+      
+      const unsubscribe = onSnapshot(userDocRef, async (snapshot) => {
+        if (snapshot.exists()) {
+          const data = snapshot.data();
+          setBalance(data.balance);
+          setActiveSlot(data.activeSlot || null);
+          setDepositsCount(data.depositsCount || 0);
+          setIsFirebaseLoaded(true);
+        } else {
+          // Initialize user
+          const userData = {
+            uid: user.id,
+            username: user.username || user.firstName || 'User',
+            balance: 0.00,
+            activeSlot: null,
+            depositsCount: 0,
+            createdAt: Date.now(),
+            lastLogin: Date.now(),
+          };
+          await setDoc(userDocRef, userData);
           logActivity('login', { username: user.username || user.firstName || 'User' });
           await addDoc(collection(db, 'loginLogs'), {
             uid: user.id,
             username: user.username || user.firstName || 'User',
             timestamp: Date.now()
           });
-          setIsFirebaseLoaded(true);
-        } catch (e) {
-          console.error("Failed to load user data", e);
-          setIsFirebaseLoaded(true);
         }
-      };
-      loadData();
-    }
-    
-    fetch('https://purchase-system-production.up.railway.app/get')
-      .then(res => res.json())
-      .then(data => {
-        if (data && data.purchases === 'enabled') {
-          setPurchasesEnabled(true);
-        } else {
-          setPurchasesEnabled(false);
-        }
-      })
-      .catch(err => console.error("Failed to fetch purchase status", err));
-  }, [isLoaded, isSignedIn, user]);
+      }, (error) => {
+        console.error("Failed to load user data", error);
+        setIsFirebaseLoaded(true);
+      });
 
-  // Update balance in Firestore whenever it changes
-  useEffect(() => {
-    if (user && isFirebaseLoaded) {
-      const updateData = async () => {
-        try {
-          const userDocRef = doc(db, 'users', user.id);
-          await updateDoc(userDocRef, {
-            balance,
-            activeSlot,
-            depositsCount
-          });
-        } catch (e) {
-          console.error("Failed to save user data", e);
-        }
-      };
-      updateData();
+      return () => unsubscribe();
     }
-  }, [balance, activeSlot, depositsCount, user, isFirebaseLoaded]);
+  }, [isLoaded, isSignedIn, user]);
 
   // Sync user with API
   useEffect(() => {
@@ -231,10 +217,13 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (activeSlot && activeSlot.expiresAt <= Date.now()) {
-      setActiveSlot(null);
+    if (activeSlot && !activeSlot.paused && activeSlot.expiresAt <= Date.now() && user) {
+      const userDocRef = doc(db, 'users', user.id);
+      updateDoc(userDocRef, {
+        activeSlot: null
+      }).catch(e => console.error("Failed to expire slot", e));
     }
-  }, [now, activeSlot]);
+  }, [now, activeSlot, user]);
 
   useEffect(() => {
     const fetchActiveUsers = async () => {
@@ -281,7 +270,21 @@ export default function App() {
           const response = await fetch('https://gfgfgf-production.up.railway.app/users');
           if (response.ok) {
             const data = await response.json();
-            setActiveSlots(data.users || []);
+            const apiSlots = data.users || [];
+            
+            // Fetch users from firestore to check paused status
+            const usersSnap = await getDocs(collection(db, 'users'));
+            const usersData = usersSnap.docs.reduce((acc: any, doc) => {
+              acc[doc.data().username] = doc.data().activeSlot?.paused || false;
+              return acc;
+            }, {});
+
+            const mergedSlots = apiSlots.map((slot: any) => ({
+              ...slot,
+              paused: usersData[slot.username] || false
+            }));
+
+            setActiveSlots(mergedSlots);
           }
         } catch (error) {
           console.error('Failed to fetch active slots:', error);
@@ -309,8 +312,8 @@ export default function App() {
   };
 
   const handlePurchase = async () => {
-    if (!purchasesEnabled) {
-      alert("Purchases are currently disabled.");
+    if (isPaused) {
+      alert("Purchases are currently disabled because slots are paused.");
       return;
     }
     
@@ -332,13 +335,17 @@ export default function App() {
 
     setIsPurchasing(true);
     
-    // Deduct balance
-    setBalance(prev => prev - totalPrice);
-    
-    // Wait till the money is off their balance (simulate delay)
-    await new Promise(resolve => setTimeout(resolve, 1000));
-
     try {
+      const userDocRef = doc(db, 'users', user.id);
+      
+      // Deduct balance in Firestore
+      await updateDoc(userDocRef, {
+        balance: increment(-totalPrice)
+      });
+      
+      // Wait till the money is off their balance (simulate delay)
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       const payload = {
         item: {
           product: {
@@ -415,10 +422,20 @@ export default function App() {
         alert("Webhook failed: " + errText);
       }
       
-      setActiveSlot({
+      await updateDoc(userDocRef, {
+        activeSlot: {
+          plan: selectedPlan || 'Normal',
+          expiresAt: Date.now() + purchaseHours * 3600 * 1000,
+          key: keyData
+        }
+      });
+      await addDoc(collection(db, 'purchaseLogs'), {
+        uid: user.id,
+        username: user.username || user.firstName || 'User',
         plan: selectedPlan || 'Normal',
-        expiresAt: Date.now() + purchaseHours * 3600 * 1000,
-        key: keyData
+        amount: totalPrice,
+        timestamp: Date.now(),
+        refunded: false
       });
       logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
       alert("Slot bought!");
@@ -427,10 +444,21 @@ export default function App() {
       console.error("Purchase failed", error);
       // Fallback key if webhook fails (e.g. CORS)
       const fallbackKey = "JW-PREMIUM-KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-      setActiveSlot({
+      const userDocRef = doc(db, 'users', user.id);
+      await updateDoc(userDocRef, {
+        activeSlot: {
+          plan: selectedPlan || 'Normal',
+          expiresAt: Date.now() + purchaseHours * 3600 * 1000,
+          key: fallbackKey
+        }
+      });
+      await addDoc(collection(db, 'purchaseLogs'), {
+        uid: user.id,
+        username: user.username || user.firstName || 'User',
         plan: selectedPlan || 'Normal',
-        expiresAt: Date.now() + purchaseHours * 3600 * 1000,
-        key: fallbackKey
+        amount: totalPrice,
+        timestamp: Date.now(),
+        refunded: false
       });
       logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
       alert("Slot bought!");
@@ -464,14 +492,20 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-black text-zinc-100 font-sans selection:bg-green-500/30 relative">
-      <audio id="bg-music" loop src="https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3?filename=calm-acoustic-114333.mp3" />
+      <audio ref={audioRef} id="bg-music" loop src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" />
       {showParticles && <RedParticles />}
       {/* Header */}
       <header className="border-b border-zinc-800/80 px-6 py-4 flex justify-between items-center relative z-10">
         {/* Logo */}
-        <div className="w-1/3 flex justify-start">
+        <div className="w-1/3 flex justify-start items-center gap-3">
           <div className="text-xl font-bold tracking-wider text-green-500">
             JW FINDER
+          </div>
+          <div className="bg-zinc-900/60 border border-zinc-800 px-2 py-1 rounded-lg flex items-center gap-1.5">
+            <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-tight">
+              {botCount} Active Bots
+            </span>
           </div>
         </div>
 
@@ -520,7 +554,7 @@ export default function App() {
         {/* User & Logout */}
         <div className="w-1/3 flex justify-end items-center gap-4">
           {/* Settings Menu */}
-          <div className="relative" id="settings-menu">
+          <div className="relative" ref={settingsRef}>
             <button 
               onClick={() => setIsSettingsOpen(!isSettingsOpen)}
               className="p-2 rounded-lg bg-zinc-900/40 border border-zinc-800/60 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all active:scale-95"
@@ -534,17 +568,15 @@ export default function App() {
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: 10, scale: 0.95 }}
                   className="absolute right-0 mt-2 w-48 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 z-50"
-                  onMouseDown={(e) => e.stopPropagation()}
-                  onClick={(e) => e.stopPropagation()}
                 >
                   <div className="flex flex-col gap-1">
-                    <button 
+                    <div 
+                      role="button"
                       onClick={(e) => {
-                        e.preventDefault();
                         e.stopPropagation();
-                        setShowParticles(!showParticles);
+                        setShowParticles(prev => !prev);
                       }}
-                      className="flex items-center justify-between w-full p-2 rounded-lg hover:bg-zinc-900 transition-colors text-sm font-medium"
+                      className="flex items-center justify-between w-full p-2 rounded-lg hover:bg-zinc-900 transition-colors text-sm font-medium cursor-pointer"
                     >
                       <div className="flex items-center gap-2 text-zinc-300">
                         <Sparkles className="w-4 h-4 text-green-500" />
@@ -553,14 +585,14 @@ export default function App() {
                       <div className={`w-8 h-4 rounded-full transition-colors relative ${showParticles ? 'bg-green-500' : 'bg-zinc-700'}`}>
                         <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${showParticles ? 'translate-x-4' : 'translate-x-0'}`} />
                       </div>
-                    </button>
-                    <button 
+                    </div>
+                    <div 
+                      role="button"
                       onClick={(e) => {
-                        e.preventDefault();
                         e.stopPropagation();
-                        setPlayMusic(!playMusic);
+                        setPlayMusic(prev => !prev);
                       }}
-                      className="flex items-center justify-between w-full p-2 rounded-lg hover:bg-zinc-900 transition-colors text-sm font-medium"
+                      className="flex items-center justify-between w-full p-2 rounded-lg hover:bg-zinc-900 transition-colors text-sm font-medium cursor-pointer"
                     >
                       <div className="flex items-center gap-2 text-zinc-300">
                         <Music className="w-4 h-4 text-green-500" />
@@ -569,7 +601,7 @@ export default function App() {
                       <div className={`w-8 h-4 rounded-full transition-colors relative ${playMusic ? 'bg-green-500' : 'bg-zinc-700'}`}>
                         <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${playMusic ? 'translate-x-4' : 'translate-x-0'}`} />
                       </div>
-                    </button>
+                    </div>
                   </div>
                 </motion.div>
               )}
@@ -595,6 +627,19 @@ export default function App() {
             transition={{ duration: 0.2 }}
             className="max-w-7xl px-6 py-10 relative z-10"
           >
+            {activeSlot?.paused && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.9 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="mb-8 bg-yellow-500/10 border border-yellow-500/30 rounded-2xl p-6 flex items-center gap-4 text-yellow-500"
+              >
+                <Pause className="w-8 h-8" />
+                <div>
+                  <h3 className="text-xl font-bold">Slot is paused</h3>
+                  <p className="text-yellow-500/80 text-sm">Your slot has been paused by an administrator. Your time will not decrease until it is unpaused.</p>
+                </div>
+              </motion.div>
+            )}
           
           {/* Top Section */}
         <div className="mb-8">
@@ -721,7 +766,11 @@ export default function App() {
               {activeSlot ? (
                 <>
                   <h3 className="text-lg font-semibold text-zinc-200 mb-2">Time Left</h3>
-                  <p className="text-sm text-zinc-400 font-mono">{formatTimeLeft(activeSlot.expiresAt)}</p>
+                  {activeSlot.paused ? (
+                    <p className="text-sm text-yellow-500 font-bold tracking-widest">PAUSED</p>
+                  ) : (
+                    <p className="text-sm text-zinc-400 font-mono">{formatTimeLeft(activeSlot.expiresAt)}</p>
+                  )}
                 </>
               ) : (
                 <>
@@ -795,7 +844,7 @@ export default function App() {
                     <div className="text-xl font-bold text-zinc-200">{slot.username}</div>
                     <div className="flex items-center gap-2 text-zinc-400 font-medium bg-zinc-950/50 w-fit px-3 py-1.5 rounded-lg border border-zinc-800/50">
                       <Clock className="w-4 h-4 text-zinc-500" />
-                      <span>{slot.expiresAt ? formatTimeLeft(new Date(slot.expiresAt).getTime()) : 'N/A'}</span>
+                      <span>{slot.paused ? 'TIME PAUSED' : (slot.expiresAt ? formatTimeLeft(new Date(slot.expiresAt).getTime()) : 'N/A')}</span>
                     </div>
                   </div>
                 </motion.div>
@@ -830,9 +879,13 @@ export default function App() {
               {/* Ultra Plan */}
               <div 
                 onClick={() => {
+                  if (isPaused) {
+                    alert("Slots are currently paused. Purchases are disabled.");
+                    return;
+                  }
                   if (globalUltraCount < 2) setSelectedPlan('Ultra');
                 }}
-                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Ultra' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalUltraCount >= 2 ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
+                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Ultra' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalUltraCount >= 2 || isPaused ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
               >
                 <div className="absolute top-6 right-6 text-green-500 font-bold tracking-wider text-lg">
                   5/H
@@ -861,9 +914,13 @@ export default function App() {
               {/* Normal Plan */}
               <div 
                 onClick={() => {
+                  if (isPaused) {
+                    alert("Slots are currently paused. Purchases are disabled.");
+                    return;
+                  }
                   if (globalNormalCount < 3) setSelectedPlan('Normal');
                 }}
-                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Normal' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalNormalCount >= 3 ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
+                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Normal' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalNormalCount >= 3 || isPaused ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
               >
                 <div className="absolute top-6 right-6 text-green-500 font-bold tracking-wider text-lg">
                   2/H
@@ -930,11 +987,11 @@ export default function App() {
               </div>
 
               <button 
-                disabled={!selectedPlan || isPurchasing || !purchasesEnabled}
+                disabled={!selectedPlan || isPurchasing || isPaused}
                 onClick={handlePurchase}
-                className={`w-full mt-6 font-bold py-3.5 rounded-xl transition-all active:scale-95 ${selectedPlan && !isPurchasing && purchasesEnabled ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed active:scale-100'}`}
+                className={`w-full mt-6 font-bold py-3.5 rounded-xl transition-all active:scale-95 ${selectedPlan && !isPurchasing && !isPaused ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed active:scale-100'}`}
               >
-                {isPurchasing ? 'Processing...' : !purchasesEnabled ? 'Purchases Disabled' : 'Purchase'}
+                {isPurchasing ? 'Processing...' : isPaused ? 'Purchases Disabled' : 'Purchase'}
               </button>
             </div>
           </div>
@@ -952,8 +1009,10 @@ export default function App() {
             className="relative z-10"
           >
             <AdminTab 
-              purchasesEnabled={purchasesEnabled} 
-              setPurchasesEnabled={setPurchasesEnabled} 
+              activeSlotsCount={activeSlots.length}
+              activeUsersCount={activeUsers.length}
+              depositsCount={depositsCount}
+              botCount={botCount}
             />
           </motion.div>
         )}

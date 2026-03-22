@@ -48,6 +48,20 @@
         "timestamp": { "type": "number", "description": "Transaction timestamp" }
       },
       "required": ["uid", "amount", "type", "timestamp"]
+    },
+    "PurchaseLog": {
+      "title": "PurchaseLog",
+      "description": "Log of slot purchases",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "User UID" },
+        "username": { "type": "string", "description": "Username" },
+        "plan": { "type": "string", "description": "Plan name" },
+        "amount": { "type": "number", "description": "Purchase amount" },
+        "timestamp": { "type": "number", "description": "Purchase timestamp" },
+        "refunded": { "type": "boolean", "description": "Refund status" }
+      },
+      "required": ["uid", "username", "plan", "amount", "timestamp", "refunded"]
     }
   },
   "firestore": {
@@ -66,6 +80,10 @@
     "/transactions/{transactionId}": {
       "schema": { "$ref": "Transaction" },
       "description": "Transactions collection"
+    },
+    "/purchaseLogs/{logId}": {
+      "schema": { "$ref": "PurchaseLog" },
+      "description": "Purchase logs collection"
     }
   }
 }
