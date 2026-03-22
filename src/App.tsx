@@ -861,15 +861,16 @@ export default function App() {
                 />
               </div>
               <button 
+                disabled={!purchasesEnabled}
                 onClick={() => {
                   window.open('https://app.paymento.io/payment-link/ddc0f06e38fe42ec86d06b84d83b080e', '_blank');
                   setDepositsCount(prev => prev + 1);
                   logActivity('payment', { item: 'Top Up', amount: topUpAmount });
                   setIsTopUpMenuOpen(false);
                 }}
-                className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)] mt-2"
+                className={`w-full ${purchasesEnabled ? 'bg-green-500 hover:bg-green-400 text-black' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'} font-bold py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)] mt-2`}
               >
-                Top Up
+                {purchasesEnabled ? 'Top Up' : 'Purchases Disabled'}
               </button>
             </div>
           </div>
