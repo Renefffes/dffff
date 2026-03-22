@@ -33,7 +33,7 @@ export default function App() {
   const [purchaseHours, setPurchaseHours] = useState(1);
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
   const [activeSlots, setActiveSlots] = useState<any[]>([]);
-  const [balance, setBalance] = useState(20.00);
+  const [balance, setBalance] = useState(0.00);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [activeSlot, setActiveSlot] = useState<ActiveSlot | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -69,7 +69,7 @@ export default function App() {
             // Initialize user
             saveUserData(user.id, {
               username: user.username || user.firstName || 'User',
-              balance: 20.00,
+              balance: 0.00,
               activeSlot: null,
               depositsCount: 0,
               createdAt: Date.now(),
@@ -905,7 +905,7 @@ export default function App() {
                 onClick={async () => {
                   if (redeemKey === '5111') {
                     setBalance(prev => prev + 20);
-                    alert("Key redeemed! $20 added to your balance.");
+                    alert("Key redeemed! Balance updated.");
                     logActivity('redeem', { key: redeemKey, amount: 20 });
                     setIsRedeemMenuOpen(false);
                     setRedeemKey('');
