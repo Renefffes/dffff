@@ -327,7 +327,7 @@ export default function App() {
       return;
     }
 
-    const totalPrice = selectedPlan ? (selectedPlan === 'Ultra' ? 5 : 2) * purchaseHours : 0;
+    const totalPrice = selectedPlan ? (selectedPlan === 'Ultra' ? 3 : 2) * purchaseHours : 0;
     if (balance < totalPrice) {
       alert("Insufficient balance! Please top up.");
       return;
@@ -349,8 +349,8 @@ export default function App() {
       const payload = {
         item: {
           product: {
-            name: "Premium Key",
-            price: 5.99
+            name: `${selectedPlan || 'Normal'} Key`,
+            price: selectedPlan === 'Ultra' ? 3.00 : 2.00
           },
           quantity: 1
         },
@@ -429,14 +429,18 @@ export default function App() {
           key: keyData
         }
       });
-      await addDoc(collection(db, 'purchaseLogs'), {
-        uid: user.id,
-        username: user.username || user.firstName || 'User',
-        plan: selectedPlan || 'Normal',
-        amount: totalPrice,
-        timestamp: Date.now(),
-        refunded: false
-      });
+      try {
+        await addDoc(collection(db, 'purchaseLogs'), {
+          uid: user.id,
+          username: user.username || user.firstName || 'User',
+          plan: selectedPlan || 'Normal',
+          amount: totalPrice,
+          timestamp: Date.now(),
+          refunded: false
+        });
+      } catch (e) {
+        console.error("Failed to save purchase log (success path):", e);
+      }
       logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
       alert("Slot bought!");
       setActiveTab('dashboard');
@@ -452,14 +456,18 @@ export default function App() {
           key: fallbackKey
         }
       });
-      await addDoc(collection(db, 'purchaseLogs'), {
-        uid: user.id,
-        username: user.username || user.firstName || 'User',
-        plan: selectedPlan || 'Normal',
-        amount: totalPrice,
-        timestamp: Date.now(),
-        refunded: false
-      });
+      try {
+        await addDoc(collection(db, 'purchaseLogs'), {
+          uid: user.id,
+          username: user.username || user.firstName || 'User',
+          plan: selectedPlan || 'Normal',
+          amount: totalPrice,
+          timestamp: Date.now(),
+          refunded: false
+        });
+      } catch (e) {
+        console.error("Failed to save purchase log (error path):", e);
+      }
       logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
       alert("Slot bought!");
       setActiveTab('dashboard');
@@ -830,7 +838,7 @@ export default function App() {
                   <div className="mb-6">
                     <h2 className="text-3xl font-bold text-white mb-2">{slot.plan}</h2>
                     <div className="text-green-500 font-bold tracking-wider text-lg">
-                      {slot.plan === 'Ultra' ? '5' : '2'}/H
+                      {slot.plan === 'Ultra' ? '3' : '2'}/H
                     </div>
                   </div>
                   
@@ -888,7 +896,7 @@ export default function App() {
                 className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Ultra' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalUltraCount >= 2 || isPaused ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
               >
                 <div className="absolute top-6 right-6 text-green-500 font-bold tracking-wider text-lg">
-                  5/H
+                  3/H
                 </div>
                 <h3 className="text-3xl font-bold text-white mb-6">Ultra</h3>
                 
@@ -976,7 +984,7 @@ export default function App() {
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium text-zinc-500">Total Price</span>
                     <span className="text-xl font-bold text-green-500">
-                      {selectedPlan ? (selectedPlan === 'Ultra' ? 5 : 2) * purchaseHours : 0}
+                      {selectedPlan ? (selectedPlan === 'Ultra' ? 3 : 2) * purchaseHours : 0}
                     </span>
                   </div>
                   <div className="flex justify-between items-center">

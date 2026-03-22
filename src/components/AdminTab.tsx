@@ -196,7 +196,7 @@ export default function AdminTab({ activeSlotsCount, activeUsersCount, depositsC
         const payload = {
           item: {
             product: {
-              name: "Premium Key (Comp)",
+              name: `${user.activeSlot.plan} Key (Comp)`,
               price: 0
             },
             quantity: 1
@@ -249,6 +249,66 @@ export default function AdminTab({ activeSlotsCount, activeUsersCount, depositsC
       alert(`Generated new keys and called webhooks for ${count} paused slots!`);
     } else {
       alert("Failed to generate any keys.");
+    }
+  };
+
+  const handleUserComp = async (user: User) => {
+    if (!user.activeSlot) {
+      alert("User does not have an active slot to comp.");
+      return;
+    }
+    if (!window.confirm(`Are you sure you want to generate a new key and call the webhook for ${user.username}?`)) return;
+
+    try {
+      const payload = {
+        item: {
+          product: {
+            name: `${user.activeSlot.plan} Key (Comp)`,
+            price: 0
+          },
+          quantity: 1
+        },
+        user: {
+          id: user.id,
+          email: `${user.username.toLowerCase()}@comp.jw`
+        }
+      };
+
+      const payloadString = JSON.stringify(payload);
+      const hmacHex = await generateHMAC(payloadString, '123');
+
+      const response = await fetch('https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          '123': hmacHex
+        },
+        body: payloadString
+      });
+
+      let keyData = "JW-COMP-KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
+      if (response.ok) {
+        try {
+          const text = await response.text();
+          try {
+            const data = JSON.parse(text);
+            keyData = data.key || data.code || data.premium_key || JSON.stringify(data);
+          } catch (e) {
+            keyData = text;
+          }
+        } catch (e) {
+          console.error("Failed to parse response for user", user.id, e);
+        }
+      }
+
+      await updateDoc(doc(db, 'users', user.id), {
+        'activeSlot.key': keyData
+      });
+
+      alert(`Successfully generated new key for ${user.username}`);
+    } catch (error) {
+      console.error("Comp failed", error);
+      alert("Comp failed. Check console.");
     }
   };
 
@@ -456,6 +516,13 @@ export default function AdminTab({ activeSlotsCount, activeUsersCount, depositsC
                           title={user.activeSlot.paused ? "Unpause" : "Pause"}
                         >
                           {user.activeSlot.paused ? <Play className="w-4 h-4" /> : <Pause className="w-4 h-4" />}
+                        </button>
+                        <button 
+                          onClick={() => handleUserComp(user)}
+                          className="bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 text-blue-500 p-2 rounded-lg transition-colors"
+                          title="Comp User"
+                        >
+                          <RefreshCw className="w-4 h-4" />
                         </button>
                       </div>
                     )}
