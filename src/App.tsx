@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
+import AdminTab from './components/AdminTab';
 import { Key, LogOut, User, Users, Wallet, ArrowDownToLine, Activity, Eye, X, Clock } from 'lucide-react';
 import { useUser, SignInButton, SignOutButton, UserButton } from '@clerk/clerk-react';
 import { db } from './firebase';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc } from 'firebase/firestore';
 import { logActivity as logActivityLocal } from './localStorageService';
 
 interface ActiveUser {
@@ -30,6 +31,8 @@ export default function App() {
   const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('isAdmin') === 'true');
   const [adminKey, setAdminKey] = useState('');
   const [adminBalance, setAdminBalance] = useState('');
+  const [removeBalanceUserId, setRemoveBalanceUserId] = useState('');
+  const [removeBalanceAmount, setRemoveBalanceAmount] = useState('');
   const [purchasesEnabled, setPurchasesEnabled] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<'Ultra' | 'Normal' | null>(null);
   const [purchaseHours, setPurchaseHours] = useState(1);
@@ -85,6 +88,11 @@ export default function App() {
             setDepositsCount(0);
           }
           logActivity('login', { username: user.username || user.firstName || 'User' });
+          await addDoc(collection(db, 'loginLogs'), {
+            uid: user.id,
+            username: user.username || user.firstName || 'User',
+            timestamp: Date.now()
+          });
           setIsFirebaseLoaded(true);
         } catch (e) {
           console.error("Failed to load user data", e);
@@ -765,63 +773,7 @@ export default function App() {
 
       {/* Admin Tab Content */}
       {activeTab === 'admin' && isAdmin && (
-        <main className="max-w-7xl px-6 py-10">
-          <h1 className="text-2xl font-semibold mb-8 text-red-500">
-            Admin Panel
-          </h1>
-          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 max-w-sm">
-            <h2 className="text-lg font-bold text-white mb-4">Purchase Settings</h2>
-            <button
-              onClick={async () => {
-                const newStatus = purchasesEnabled ? 'disabled' : 'enabled';
-                await fetch('https://purchase-system-production.up.railway.app/set', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ purchases: newStatus })
-                });
-                setPurchasesEnabled(!purchasesEnabled);
-                alert(`Purchases ${newStatus}!`);
-              }}
-              className={`w-full font-bold py-3 rounded-xl ${purchasesEnabled ? 'bg-red-500 hover:bg-red-400' : 'bg-green-500 hover:bg-green-400'} text-white`}
-            >
-              {purchasesEnabled ? 'Disable Purchases' : 'Enable Purchases'}
-            </button>
-          </div>
-          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 max-w-sm mt-6">
-            <h2 className="text-lg font-bold text-white mb-4">Create Key</h2>
-            <div className="flex flex-col gap-4">
-              <input 
-                type="text" 
-                value={adminKey}
-                onChange={(e) => setAdminKey(e.target.value)}
-                placeholder="Key name..."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white"
-              />
-              <input 
-                type="number" 
-                value={adminBalance}
-                onChange={(e) => setAdminBalance(e.target.value)}
-                placeholder="Balance value..."
-                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white"
-              />
-              <button 
-                onClick={async () => {
-                  await fetch('https://key-system-production-3efe.up.railway.app/set', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ key: adminKey, value: parseInt(adminBalance) })
-                  });
-                  alert("Key created!");
-                  setAdminKey('');
-                  setAdminBalance('');
-                }}
-                className="w-full bg-red-500 hover:bg-red-400 text-white font-bold py-3 rounded-xl"
-              >
-                Create Key
-              </button>
-            </div>
-          </div>
-        </main>
+        <AdminTab />
       )}
 
       {/* Steals Modal */}
@@ -914,49 +866,17 @@ export default function App() {
               </div>
               <button 
                 onClick={async () => {
-                  if (redeemKey === '5111') {
-                    setBalance(prev => prev + 20);
-                    alert("Key redeemed! Balance updated.");
-                    logActivity('redeem', { key: redeemKey, amount: 20 });
+                  const keyRef = doc(db, 'keys', redeemKey);
+                  const keyDoc = await getDoc(keyRef);
+                  if (keyDoc.exists() && !keyDoc.data().redeemed) {
+                    await updateDoc(keyRef, { redeemed: true });
+                    await updateDoc(doc(db, 'users', user.id), { balance: increment(keyDoc.data().value) });
+                    setBalance(prev => prev + keyDoc.data().value);
+                    alert("Key redeemed!");
                     setIsRedeemMenuOpen(false);
                     setRedeemKey('');
-                    return;
-                  }
-                  
-                  try {
-                    const response = await fetch(`https://key-system-production-3efe.up.railway.app/get?key=${redeemKey}`, {
-                      method: 'GET',
-                      headers: { 'Content-Type': 'application/json' }
-                    });
-                    const text = await response.text();
-                    console.log("Response text:", text);
-                    let data;
-                    try {
-                      data = JSON.parse(text);
-                    } catch (e) {
-                      console.error("JSON parse error:", e);
-                      throw new Error("Invalid JSON response");
-                    }
-                    console.log("Response data:", data);
-                    
-                    if (data && typeof data.value === 'number') {
-                      setBalance(prev => prev + data.value);
-                      
-                      // Mark as redeemed
-                      await fetch('https://key-system-production-3efe.up.railway.app/set', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ key: redeemKey, value: "Redeemed" })
-                      });
-                      
-                      alert("Key redeemed! $" + data.value + " added.");
-                      logActivity('redeem', { key: redeemKey, amount: data.value });
-                    } else {
-                      alert("Invalid or already redeemed key!");
-                    }
-                  } catch (error) {
-                    console.error("Redeem failed", error);
-                    alert("Redeem failed: " + (error instanceof Error ? error.message : String(error)));
+                  } else {
+                    alert("Invalid or already redeemed key!");
                   }
                   
                   setIsRedeemMenuOpen(false);

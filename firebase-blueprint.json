@@ -14,12 +14,58 @@
         "lastLogin": { "type": "number", "description": "Last login timestamp" }
       },
       "required": ["uid", "balance", "depositsCount", "createdAt", "lastLogin"]
+    },
+    "Key": {
+      "title": "Key",
+      "description": "Redeemable key",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "description": "Key string" },
+        "value": { "type": "number", "description": "Balance value" },
+        "redeemed": { "type": "boolean", "description": "Redemption status" }
+      },
+      "required": ["key", "value", "redeemed"]
+    },
+    "LoginLog": {
+      "title": "LoginLog",
+      "description": "Log of user logins",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "username": { "type": "string", "description": "Display name" },
+        "timestamp": { "type": "number", "description": "Login timestamp" }
+      },
+      "required": ["uid", "username", "timestamp"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Log of balance changes",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "amount": { "type": "number", "description": "Amount changed" },
+        "type": { "type": "string", "description": "Type: add or remove" },
+        "timestamp": { "type": "number", "description": "Transaction timestamp" }
+      },
+      "required": ["uid", "amount", "type", "timestamp"]
     }
   },
   "firestore": {
     "/users/{uid}": {
       "schema": { "$ref": "User" },
       "description": "User profile document"
+    },
+    "/keys/{keyId}": {
+      "schema": { "$ref": "Key" },
+      "description": "Keys document"
+    },
+    "/loginLogs/{logId}": {
+      "schema": { "$ref": "LoginLog" },
+      "description": "Login logs collection"
+    },
+    "/transactions/{transactionId}": {
+      "schema": { "$ref": "Transaction" },
+      "description": "Transactions collection"
     }
   }
 }

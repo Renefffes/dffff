@@ -1,34 +1,36 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
-    function isAuthenticated() {
-      return request.auth != null;
-    }
-    
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
-    }
+    // WARNING: Since the app uses Clerk for authentication instead of Firebase Auth,
+    // request.auth is always null. These rules are currently relaxed for prototyping.
+    // For production, you MUST integrate Clerk with Firebase Auth using custom tokens.
 
     function isValidUser(data) {
-      return data.keys().hasOnly(['uid', 'username', 'balance', 'activeSlot', 'depositsCount', 'createdAt', 'lastLogin']) &&
+      return data.keys().hasOnly(['uid', 'username', 'balance', 'activeSlot', 'depositsCount', 'createdAt', 'lastLogin', 'role']) &&
              data.uid is string &&
              data.username is string && data.username.size() > 0 && data.username.size() <= 50 &&
              data.balance is number && data.balance >= 0 &&
              (!('activeSlot' in data) || data.activeSlot is map) &&
              data.depositsCount is number && data.depositsCount >= 0 &&
              data.createdAt is number &&
-             data.lastLogin is number;
+             data.lastLogin is number &&
+             (!('role' in data) || data.role is string);
     }
 
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.uid == userId;
-      allow update: if isOwner(userId) && 
-                       request.resource.data.uid == resource.data.uid &&
-                       request.resource.data.createdAt == resource.data.createdAt &&
-                       isValidUser(request.resource.data);
-      allow delete: if false; // Users cannot delete their own profile
+      allow read, write: if true; // INSECURE: Relaxed for Clerk prototype
+    }
+
+    match /keys/{keyId} {
+      allow read, write: if true; // INSECURE: Relaxed for Clerk prototype
+    }
+
+    match /loginLogs/{logId} {
+      allow read, write: if true; // INSECURE: Relaxed for Clerk prototype
+    }
+
+    match /transactions/{transactionId} {
+      allow read, write: if true; // INSECURE: Relaxed for Clerk prototype
     }
   }
 }
