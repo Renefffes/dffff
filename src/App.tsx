@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Key, LogOut, User, Users, Wallet, ArrowDownToLine, Activity, Eye, X, Clock } from 'lucide-react';
 import { useUser, SignInButton, SignOutButton, UserButton } from '@clerk/clerk-react';
+import { loadUserData, saveUserData, logActivity as logActivityLocal, UserData } from './localStorageService';
 
 interface ActiveUser {
   username: string;
@@ -24,19 +25,144 @@ export default function App() {
   const [redeemKey, setRedeemKey] = useState('');
   const [topUpAmount, setTopUpAmount] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
+  const [isAdmin, setIsAdmin] = useState(() => localStorage.getItem('isAdmin') === 'true');
+  const [adminKey, setAdminKey] = useState('');
+  const [adminBalance, setAdminBalance] = useState('');
+  const [purchasesEnabled, setPurchasesEnabled] = useState(true);
   const [selectedPlan, setSelectedPlan] = useState<'Ultra' | 'Normal' | null>(null);
   const [purchaseHours, setPurchaseHours] = useState(1);
   const [activeUsers, setActiveUsers] = useState<ActiveUser[]>([]);
+  const [activeSlots, setActiveSlots] = useState<any[]>([]);
   const [balance, setBalance] = useState(20.00);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [activeSlot, setActiveSlot] = useState<ActiveSlot | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [isFirebaseLoaded, setIsFirebaseLoaded] = useState(false);
   const [depositsCount, setDepositsCount] = useState(() => {
     const saved = localStorage.getItem('depositsCount');
     return saved ? parseInt(saved, 10) : 0;
   });
   
   const { isLoaded, isSignedIn, user } = useUser();
+
+  const logActivity = (action: string, details: any = {}) => {
+    if (!user) return;
+    logActivityLocal(user.id, action, details);
+  };
+
+  // Exposed for future game integrations
+  const logGameResult = async (win: boolean, amount: number) => {
+    await logActivity('game_result', { win, amount });
+  };
+
+  useEffect(() => {
+    if (isLoaded && isSignedIn && user) {
+      const loadData = () => {
+        try {
+          const data = loadUserData(user.id);
+          
+          if (data) {
+            setBalance(data.balance);
+            setActiveSlot(data.activeSlot);
+            setDepositsCount(data.depositsCount);
+          } else {
+            // Initialize user
+            saveUserData(user.id, {
+              username: user.username || user.firstName || 'User',
+              balance: 20.00,
+              activeSlot: null,
+              depositsCount: 0,
+              createdAt: Date.now(),
+              lastLogin: Date.now(),
+              activity: []
+            });
+          }
+          logActivity('login', { username: user.username || user.firstName || 'User' });
+          setIsFirebaseLoaded(true);
+        } catch (e) {
+          console.error("Failed to load user data", e);
+          setIsFirebaseLoaded(true);
+        }
+      };
+      loadData();
+    }
+    
+    fetch('https://purchase-system-production.up.railway.app/get')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.purchases === 'enabled') {
+          setPurchasesEnabled(true);
+        } else {
+          setPurchasesEnabled(false);
+        }
+      })
+      .catch(err => console.error("Failed to fetch purchase status", err));
+  }, [isLoaded, isSignedIn, user]);
+
+  // Update balance in localStorage whenever it changes
+  useEffect(() => {
+    if (user && isFirebaseLoaded) {
+      const data = loadUserData(user.id);
+      if (data) {
+        saveUserData(user.id, {
+          ...data,
+          balance,
+          activeSlot,
+          depositsCount
+        });
+      }
+    }
+  }, [balance, activeSlot, depositsCount, user, isFirebaseLoaded]);
+
+  // Sync user with API
+  useEffect(() => {
+    if (user) {
+      const syncUser = async () => {
+        try {
+          await fetch('https://gfgfgf-production.up.railway.app/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              discordUserId: user.id,
+              discordUsername: user.username || user.firstName || 'User',
+            })
+          });
+        } catch (error) {
+          console.error('Failed to sync user:', error);
+        }
+      };
+      syncUser();
+    }
+  }, [user]);
+
+  const fetchUsers = async () => {
+    try {
+      const response = await fetch('https://gfgfgf-production.up.railway.app/users');
+      if (response.ok) {
+        return await response.json();
+      }
+    } catch (error) {
+      console.error('Failed to fetch users:', error);
+    }
+    return [];
+  };
+
+  // Log button clicks
+  useEffect(() => {
+    if (!user) return;
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      const button = target.closest('button');
+      if (button) {
+        logActivityLocal(user.id, 'button_click', {
+          buttonText: button.innerText || button.getAttribute('aria-label') || 'unknown',
+          buttonId: button.id || 'none'
+        });
+      }
+    };
+    document.addEventListener('click', handleClick);
+    return () => document.removeEventListener('click', handleClick);
+  }, [user]);
 
   useEffect(() => {
     localStorage.setItem('depositsCount', depositsCount.toString());
@@ -46,6 +172,12 @@ export default function App() {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (activeSlot && activeSlot.expiresAt <= Date.now()) {
+      setActiveSlot(null);
+    }
+  }, [now, activeSlot]);
 
   useEffect(() => {
     const fetchActiveUsers = async () => {
@@ -65,6 +197,23 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (activeTab === 'slots') {
+      const fetchSlots = async () => {
+        try {
+          const response = await fetch('https://gfgfgf-production.up.railway.app/users');
+          if (response.ok) {
+            const data = await response.json();
+            setActiveSlots(data.users || []);
+          }
+        } catch (error) {
+          console.error('Failed to fetch active slots:', error);
+        }
+      };
+      fetchSlots();
+    }
+  }, [activeTab]);
+
   const formatDuration = (joinedAtSeconds: number) => {
     const nowSec = Math.floor(Date.now() / 1000);
     const diff = Math.max(0, nowSec - joinedAtSeconds);
@@ -83,6 +232,10 @@ export default function App() {
   };
 
   const handlePurchase = async () => {
+    if (!purchasesEnabled) {
+      alert("Purchases are currently disabled.");
+      return;
+    }
     const totalPrice = selectedPlan ? (selectedPlan === 'Ultra' ? 5 : 2) * purchaseHours : 0;
     if (balance < totalPrice) {
       alert("Insufficient balance! Please top up.");
@@ -136,11 +289,23 @@ export default function App() {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          '123': hmacHex,
-          'hmac': hmacHex,
-          'x-hmac-signature': hmacHex
+          '123': hmacHex
         },
         body: payloadString
+      });
+
+      // Send user data to the new API
+      await fetch('https://gfgfgf-production.up.railway.app/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          discordId: user?.id || "test_user_123",
+          username: user?.username || user?.firstName || 'User',
+          plan: selectedPlan || 'Normal',
+          timeAmount: purchaseHours * 60 // convert hours to minutes
+        })
       });
 
       let keyData = "JW-PREMIUM-KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -167,6 +332,7 @@ export default function App() {
         expiresAt: Date.now() + purchaseHours * 3600 * 1000,
         key: keyData
       });
+      logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
       alert("Slot bought!");
       setActiveTab('dashboard');
     } catch (error) {
@@ -178,6 +344,7 @@ export default function App() {
         expiresAt: Date.now() + purchaseHours * 3600 * 1000,
         key: fallbackKey
       });
+      logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
       alert("Slot bought!");
       setActiveTab('dashboard');
     } finally {
@@ -238,12 +405,26 @@ export default function App() {
           >
             Purchase
           </button>
-          <button 
-            onClick={() => setActiveTab('highlights')}
-            className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'highlights' ? 'bg-zinc-800 text-green-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
-          >
-            Highlights
-          </button>
+          {isAdmin ? (
+            <button 
+              onClick={() => setActiveTab('admin')}
+              className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'admin' ? 'bg-zinc-800 text-red-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+            >
+              Admin
+            </button>
+          ) : (
+            <input
+              type="password"
+              placeholder="Admin Key"
+              className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-xs text-white w-24"
+              onChange={(e) => {
+                if (e.target.value === 'AMOS202080') {
+                  setIsAdmin(true);
+                  localStorage.setItem('isAdmin', 'true');
+                }
+              }}
+            />
+          )}
         </nav>
 
         {/* User & Logout */}
@@ -420,27 +601,34 @@ export default function App() {
           </h1>
           
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {/* Slot Card */}
-            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col hover:border-green-500/30 transition-colors">
-              <div className="mb-6">
-                <h2 className="text-3xl font-bold text-white mb-2">Ultra</h2>
-                <div className="text-green-500 font-bold tracking-wider text-lg">5/H</div>
-              </div>
-              
-              {/* Progress Line */}
-              <div className="w-full h-1.5 bg-zinc-800 rounded-full mb-8 overflow-hidden">
-                <div className="h-full bg-white w-1/3 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.5)]"></div>
-              </div>
-              
-              {/* User Info */}
-              <div className="flex flex-col gap-3">
-                <div className="text-xl font-bold text-zinc-200">Yxzyk</div>
-                <div className="flex items-center gap-2 text-zinc-400 font-medium bg-zinc-950/50 w-fit px-3 py-1.5 rounded-lg border border-zinc-800/50">
-                  <Clock className="w-4 h-4 text-zinc-500" />
-                  <span>2H</span>
+            {activeSlots.length === 0 ? (
+              <div className="text-zinc-500 text-center py-4">No active slots found.</div>
+            ) : (
+              activeSlots.map((slot, index) => (
+                <div key={index} className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col hover:border-green-500/30 transition-colors">
+                  <div className="mb-6">
+                    <h2 className="text-3xl font-bold text-white mb-2">{slot.plan}</h2>
+                    <div className="text-green-500 font-bold tracking-wider text-lg">
+                      {slot.plan === 'Ultra' ? '5' : '2'}/H
+                    </div>
+                  </div>
+                  
+                  {/* Progress Line */}
+                  <div className="w-full h-1.5 bg-zinc-800 rounded-full mb-8 overflow-hidden">
+                    <div className="h-full bg-white w-1/3 rounded-full shadow-[0_0_10px_rgba(255,255,255,0.5)]"></div>
+                  </div>
+                  
+                  {/* User Info */}
+                  <div className="flex flex-col gap-3">
+                    <div className="text-xl font-bold text-zinc-200">{slot.username}</div>
+                    <div className="flex items-center gap-2 text-zinc-400 font-medium bg-zinc-950/50 w-fit px-3 py-1.5 rounded-lg border border-zinc-800/50">
+                      <Clock className="w-4 h-4 text-zinc-500" />
+                      <span>{slot.expiresAt ? formatTimeLeft(new Date(slot.expiresAt).getTime()) : 'N/A'}</span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            </div>
+              ))
+            )}
           </div>
         </main>
       )}
@@ -553,35 +741,74 @@ export default function App() {
               </div>
 
               <button 
-                disabled={!selectedPlan || isPurchasing}
+                disabled={!selectedPlan || isPurchasing || !purchasesEnabled}
                 onClick={handlePurchase}
-                className={`w-full mt-6 font-bold py-3.5 rounded-xl transition-all ${selectedPlan && !isPurchasing ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}`}
+                className={`w-full mt-6 font-bold py-3.5 rounded-xl transition-all ${selectedPlan && !isPurchasing && purchasesEnabled ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}`}
               >
-                {isPurchasing ? 'Processing...' : 'Purchase'}
+                {isPurchasing ? 'Processing...' : !purchasesEnabled ? 'Purchases Disabled' : 'Purchase'}
               </button>
             </div>
           </div>
         </main>
       )}
 
-      {/* Highlights Tab Content */}
-      {activeTab === 'highlights' && (
+      {/* Admin Tab Content */}
+      {activeTab === 'admin' && isAdmin && (
         <main className="max-w-7xl px-6 py-10">
-          <div className="mb-8">
-            <h1 className="text-2xl font-semibold mb-2 text-zinc-300">
-              Highlights
-            </h1>
-            <h2 className="text-lg text-zinc-500 font-medium">
-              Top Steals & Activity
-            </h2>
+          <h1 className="text-2xl font-semibold mb-8 text-red-500">
+            Admin Panel
+          </h1>
+          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 max-w-sm">
+            <h2 className="text-lg font-bold text-white mb-4">Purchase Settings</h2>
+            <button
+              onClick={async () => {
+                const newStatus = purchasesEnabled ? 'disabled' : 'enabled';
+                await fetch('https://purchase-system-production.up.railway.app/set', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ purchases: newStatus })
+                });
+                setPurchasesEnabled(!purchasesEnabled);
+                alert(`Purchases ${newStatus}!`);
+              }}
+              className={`w-full font-bold py-3 rounded-xl ${purchasesEnabled ? 'bg-red-500 hover:bg-red-400' : 'bg-green-500 hover:bg-green-400'} text-white`}
+            >
+              {purchasesEnabled ? 'Disable Purchases' : 'Enable Purchases'}
+            </button>
           </div>
-          
-          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-8 flex flex-col items-center justify-center min-h-[400px]">
-            <Activity className="w-12 h-12 text-zinc-600 mb-4" />
-            <h3 className="text-xl font-bold text-zinc-300 mb-2">No highlights yet</h3>
-            <p className="text-zinc-500 text-center max-w-md">
-              Recent activity and top steals will appear here once your slots start finding items.
-            </p>
+          <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 max-w-sm mt-6">
+            <h2 className="text-lg font-bold text-white mb-4">Create Key</h2>
+            <div className="flex flex-col gap-4">
+              <input 
+                type="text" 
+                value={adminKey}
+                onChange={(e) => setAdminKey(e.target.value)}
+                placeholder="Key name..."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white"
+              />
+              <input 
+                type="number" 
+                value={adminBalance}
+                onChange={(e) => setAdminBalance(e.target.value)}
+                placeholder="Balance value..."
+                className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-4 py-3 text-white"
+              />
+              <button 
+                onClick={async () => {
+                  await fetch('https://key-system-production-3efe.up.railway.app/set', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ key: adminKey, value: parseInt(adminBalance) })
+                  });
+                  alert("Key created!");
+                  setAdminKey('');
+                  setAdminBalance('');
+                }}
+                className="w-full bg-red-500 hover:bg-red-400 text-white font-bold py-3 rounded-xl"
+              >
+                Create Key
+              </button>
+            </div>
           </div>
         </main>
       )}
@@ -637,6 +864,7 @@ export default function App() {
                 onClick={() => {
                   window.open('https://app.paymento.io/payment-link/ddc0f06e38fe42ec86d06b84d83b080e', '_blank');
                   setDepositsCount(prev => prev + 1);
+                  logActivity('payment', { item: 'Top Up', amount: topUpAmount });
                   setIsTopUpMenuOpen(false);
                 }}
                 className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)] mt-2"
@@ -673,8 +901,52 @@ export default function App() {
                 />
               </div>
               <button 
-                onClick={() => {
-                  // Add redeem logic here
+                onClick={async () => {
+                  if (redeemKey === '5111') {
+                    setBalance(prev => prev + 20);
+                    alert("Key redeemed! $20 added to your balance.");
+                    logActivity('redeem', { key: redeemKey, amount: 20 });
+                    setIsRedeemMenuOpen(false);
+                    setRedeemKey('');
+                    return;
+                  }
+                  
+                  try {
+                    const response = await fetch(`https://key-system-production-3efe.up.railway.app/get?key=${redeemKey}`, {
+                      method: 'GET',
+                      headers: { 'Content-Type': 'application/json' }
+                    });
+                    const text = await response.text();
+                    console.log("Response text:", text);
+                    let data;
+                    try {
+                      data = JSON.parse(text);
+                    } catch (e) {
+                      console.error("JSON parse error:", e);
+                      throw new Error("Invalid JSON response");
+                    }
+                    console.log("Response data:", data);
+                    
+                    if (data && typeof data.value === 'number') {
+                      setBalance(prev => prev + data.value);
+                      
+                      // Mark as redeemed
+                      await fetch('https://key-system-production-3efe.up.railway.app/set', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ key: redeemKey, value: "Redeemed" })
+                      });
+                      
+                      alert("Key redeemed! $" + data.value + " added.");
+                      logActivity('redeem', { key: redeemKey, amount: data.value });
+                    } else {
+                      alert("Invalid or already redeemed key!");
+                    }
+                  } catch (error) {
+                    console.error("Redeem failed", error);
+                    alert("Redeem failed: " + (error instanceof Error ? error.message : String(error)));
+                  }
+                  
                   setIsRedeemMenuOpen(false);
                   setRedeemKey('');
                 }}
@@ -704,12 +976,12 @@ export default function App() {
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 relative group">
                 <pre className="text-green-400 font-mono text-sm overflow-x-auto whitespace-pre-wrap break-all">
 {`getgenv().SCRIPT_KEY = "${activeSlot.key}"
-loadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/25975dc6d913f7a2cc956f304678bd47b5498ba7991d9f88c6a4ef794f33f1ad/download"))()`}
+loadstring(game:HttpGet("https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1"))()`}
                 </pre>
               </div>
               <button 
                 onClick={() => {
-                  navigator.clipboard.writeText(`getgenv().SCRIPT_KEY = "${activeSlot.key}"\nloadstring(game:HttpGet("https://api.jnkie.com/api/v1/luascripts/public/25975dc6d913f7a2cc956f304678bd47b5498ba7991d9f88c6a4ef794f33f1ad/download"))()`);
+                  navigator.clipboard.writeText(`getgenv().SCRIPT_KEY = "${activeSlot.key}"\nloadstring(game:HttpGet("https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1"))()`);
                   alert("Script copied to clipboard!");
                 }}
                 className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl transition-all"

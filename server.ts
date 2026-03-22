@@ -51,7 +51,7 @@ async function startServer() {
           }),
         });
 
-        const tokenData = await tokenResponse.json();
+        const tokenData = await tokenResponse.json() as { access_token: string };
         const accessToken = tokenData.access_token;
 
         if (accessToken) {
