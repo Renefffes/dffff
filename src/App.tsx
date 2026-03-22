@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
 import AdminTab from './components/AdminTab';
-import { Key, LogOut, User, Users, Wallet, ArrowDownToLine, Activity, Eye, X, Clock } from 'lucide-react';
+import RedParticles from './components/RedParticles';
+import { Key, LogOut, User, Users, Wallet, ArrowDownToLine, Activity, Eye, X, Clock, Settings, Music, Sparkles } from 'lucide-react';
 import { useUser, SignInButton, SignOutButton, UserButton } from '@clerk/clerk-react';
 import { db } from './firebase';
-import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc, updateDoc, increment, collection, addDoc, onSnapshot, query } from 'firebase/firestore';
 import { logActivity as logActivityLocal } from './localStorageService';
 
 interface ActiveUser {
@@ -41,8 +43,13 @@ export default function App() {
   const [balance, setBalance] = useState(0.00);
   const [isPurchasing, setIsPurchasing] = useState(false);
   const [activeSlot, setActiveSlot] = useState<ActiveSlot | null>(null);
+  const [globalUltraCount, setGlobalUltraCount] = useState(0);
+  const [globalNormalCount, setGlobalNormalCount] = useState(0);
   const [now, setNow] = useState(Date.now());
   const [isFirebaseLoaded, setIsFirebaseLoaded] = useState(false);
+  const [showParticles, setShowParticles] = useState(() => localStorage.getItem('showParticles') !== 'false');
+  const [playMusic, setPlayMusic] = useState(() => localStorage.getItem('playMusic') === 'true');
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [depositsCount, setDepositsCount] = useState(() => {
     const saved = localStorage.getItem('depositsCount');
     return saved ? parseInt(saved, 10) : 0;
@@ -59,6 +66,37 @@ export default function App() {
   const logGameResult = async (win: boolean, amount: number) => {
     await logActivity('game_result', { win, amount });
   };
+
+  useEffect(() => {
+    localStorage.setItem('showParticles', showParticles.toString());
+  }, [showParticles]);
+
+  useEffect(() => {
+    localStorage.setItem('playMusic', playMusic.toString());
+    const audio = document.getElementById('bg-music') as HTMLAudioElement;
+    if (audio) {
+      if (playMusic) {
+        audio.play().catch(e => console.log("Audio play failed:", e));
+      } else {
+        audio.pause();
+      }
+    }
+  }, [playMusic]);
+
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest('#settings-menu')) {
+        setIsSettingsOpen(false);
+      }
+    };
+    if (isSettingsOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isSettingsOpen]);
 
   useEffect(() => {
     if (isLoaded && isSignedIn && user) {
@@ -216,6 +254,26 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
+  // Listen to all users to count active slots globally
+  useEffect(() => {
+    const q = query(collection(db, 'users'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let ultra = 0;
+      let normal = 0;
+      const nowTime = Date.now();
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        if (data.activeSlot && data.activeSlot.expiresAt > nowTime) {
+          if (data.activeSlot.plan === 'Ultra') ultra++;
+          if (data.activeSlot.plan === 'Normal') normal++;
+        }
+      });
+      setGlobalUltraCount(ultra);
+      setGlobalNormalCount(normal);
+    });
+    return () => unsubscribe();
+  }, []);
+
   useEffect(() => {
     if (activeTab === 'slots') {
       const fetchSlots = async () => {
@@ -255,6 +313,17 @@ export default function App() {
       alert("Purchases are currently disabled.");
       return;
     }
+    
+    if (selectedPlan === 'Ultra' && globalUltraCount >= 2) {
+      alert("Ultra slots are currently sold out! Only 2 people can have them at a time.");
+      return;
+    }
+    
+    if (selectedPlan === 'Normal' && globalNormalCount >= 3) {
+      alert("Normal slots are currently sold out! Only 3 people can have them at a time.");
+      return;
+    }
+
     const totalPrice = selectedPlan ? (selectedPlan === 'Ultra' ? 5 : 2) * purchaseHours : 0;
     if (balance < totalPrice) {
       alert("Insufficient balance! Please top up.");
@@ -394,9 +463,11 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-black text-zinc-100 font-sans selection:bg-green-500/30">
+    <div className="min-h-screen bg-black text-zinc-100 font-sans selection:bg-green-500/30 relative">
+      <audio id="bg-music" loop src="https://cdn.pixabay.com/download/audio/2022/01/18/audio_d0a13f69d2.mp3?filename=calm-acoustic-114333.mp3" />
+      {showParticles && <RedParticles />}
       {/* Header */}
-      <header className="border-b border-zinc-800/80 px-6 py-4 flex justify-between items-center">
+      <header className="border-b border-zinc-800/80 px-6 py-4 flex justify-between items-center relative z-10">
         {/* Logo */}
         <div className="w-1/3 flex justify-start">
           <div className="text-xl font-bold tracking-wider text-green-500">
@@ -408,26 +479,26 @@ export default function App() {
         <nav className="hidden md:flex items-center gap-1 bg-zinc-900/40 p-1 rounded-xl border border-zinc-800/60">
           <button 
             onClick={() => setActiveTab('dashboard')}
-            className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'dashboard' ? 'bg-zinc-800 text-green-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+            className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all active:scale-95 ${activeTab === 'dashboard' ? 'bg-zinc-800 text-green-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
           >
             Dashboard
           </button>
           <button 
             onClick={() => setActiveTab('slots')}
-            className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'slots' ? 'bg-zinc-800 text-green-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+            className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all active:scale-95 ${activeTab === 'slots' ? 'bg-zinc-800 text-green-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
           >
             Slots
           </button>
           <button 
             onClick={() => setActiveTab('purchase')}
-            className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'purchase' ? 'bg-zinc-800 text-green-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+            className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all active:scale-95 ${activeTab === 'purchase' ? 'bg-zinc-800 text-green-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
           >
             Purchase
           </button>
           {isAdmin ? (
             <button 
               onClick={() => setActiveTab('admin')}
-              className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all ${activeTab === 'admin' ? 'bg-zinc-800 text-red-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
+              className={`px-5 py-1.5 rounded-lg text-sm font-semibold transition-all active:scale-95 ${activeTab === 'admin' ? 'bg-zinc-800 text-red-500 shadow-sm' : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/50'}`}
             >
               Admin
             </button>
@@ -447,7 +518,63 @@ export default function App() {
         </nav>
 
         {/* User & Logout */}
-        <div className="w-1/3 flex justify-end items-center gap-6">
+        <div className="w-1/3 flex justify-end items-center gap-4">
+          {/* Settings Menu */}
+          <div className="relative" id="settings-menu">
+            <button 
+              onClick={() => setIsSettingsOpen(!isSettingsOpen)}
+              className="p-2 rounded-lg bg-zinc-900/40 border border-zinc-800/60 text-zinc-400 hover:text-white hover:bg-zinc-800 transition-all active:scale-95"
+            >
+              <Settings className="w-5 h-5" />
+            </button>
+            <AnimatePresence>
+              {isSettingsOpen && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute right-0 mt-2 w-48 bg-zinc-950 border border-zinc-800 rounded-xl shadow-2xl p-2 z-50"
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div className="flex flex-col gap-1">
+                    <button 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setShowParticles(!showParticles);
+                      }}
+                      className="flex items-center justify-between w-full p-2 rounded-lg hover:bg-zinc-900 transition-colors text-sm font-medium"
+                    >
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Sparkles className="w-4 h-4 text-green-500" />
+                        Particles
+                      </div>
+                      <div className={`w-8 h-4 rounded-full transition-colors relative ${showParticles ? 'bg-green-500' : 'bg-zinc-700'}`}>
+                        <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${showParticles ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </div>
+                    </button>
+                    <button 
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        setPlayMusic(!playMusic);
+                      }}
+                      className="flex items-center justify-between w-full p-2 rounded-lg hover:bg-zinc-900 transition-colors text-sm font-medium"
+                    >
+                      <div className="flex items-center gap-2 text-zinc-300">
+                        <Music className="w-4 h-4 text-green-500" />
+                        Music
+                      </div>
+                      <div className={`w-8 h-4 rounded-full transition-colors relative ${playMusic ? 'bg-green-500' : 'bg-zinc-700'}`}>
+                        <div className={`absolute top-0.5 left-0.5 w-3 h-3 rounded-full bg-white transition-transform ${playMusic ? 'translate-x-4' : 'translate-x-0'}`} />
+                      </div>
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
           <div className="flex items-center gap-2 text-sm font-medium" id="user-box">
             <UserButton afterSignOutUrl="/" />
             <span className="hidden sm:inline-block" id="welcome">
@@ -458,8 +585,16 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      {activeTab === 'dashboard' && (
-        <main className="max-w-7xl px-6 py-10">
+      <AnimatePresence mode="wait">
+        {activeTab === 'dashboard' && (
+          <motion.main 
+            key="dashboard"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="max-w-7xl px-6 py-10 relative z-10"
+          >
           
           {/* Top Section */}
         <div className="mb-8">
@@ -472,14 +607,14 @@ export default function App() {
           <div className="flex flex-wrap gap-4">
             <button 
               onClick={() => setIsTopUpMenuOpen(true)}
-              className="bg-green-500 hover:bg-green-400 text-black font-bold px-8 py-3 rounded-xl transition-colors flex items-center gap-2 shadow-[0_0_15px_rgba(34,197,94,0.3)] hover:shadow-[0_0_25px_rgba(34,197,94,0.5)]"
+              className="bg-green-500 hover:bg-green-400 text-black font-bold px-8 py-3 rounded-xl transition-all active:scale-95 flex items-center gap-2 shadow-[0_0_15px_rgba(34,197,94,0.3)] hover:shadow-[0_0_25px_rgba(34,197,94,0.5)]"
             >
               <Wallet className="w-5 h-5" />
               Top up
             </button>
             <button 
               onClick={() => setIsRedeemMenuOpen(true)}
-              className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-white font-semibold px-8 py-3 rounded-xl transition-colors flex items-center gap-2"
+              className="bg-zinc-900 hover:bg-zinc-800 border border-zinc-700 text-white font-semibold px-8 py-3 rounded-xl transition-all active:scale-95 flex items-center gap-2"
             >
               <Key className="w-5 h-5 text-green-500" />
               Redeem Key
@@ -495,7 +630,7 @@ export default function App() {
             {/* 3 Squares */}
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               {/* Card 1 */}
-            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col justify-center hover:border-green-500/30 transition-colors group">
+            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col justify-center hover:border-green-500/30 transition-all active:scale-[0.98] group">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800 group-hover:border-green-500/30 transition-colors">
                   <Wallet className="w-5 h-5 text-green-500" />
@@ -506,7 +641,7 @@ export default function App() {
             </div>
             
             {/* Card 2 */}
-            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col justify-center hover:border-green-500/30 transition-colors group">
+            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col justify-center hover:border-green-500/30 transition-all active:scale-[0.98] group">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800 group-hover:border-green-500/30 transition-colors">
                   <Users className="w-5 h-5 text-green-500" />
@@ -517,7 +652,7 @@ export default function App() {
             </div>
             
             {/* Card 3 */}
-            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col justify-center hover:border-green-500/30 transition-colors group">
+            <div className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col justify-center hover:border-green-500/30 transition-all active:scale-[0.98] group">
               <div className="flex items-center gap-3 mb-4">
                 <div className="p-2 rounded-lg bg-zinc-950 border border-zinc-800 group-hover:border-green-500/30 transition-colors">
                   <ArrowDownToLine className="w-5 h-5 text-green-500" />
@@ -544,7 +679,12 @@ export default function App() {
                   <div className="text-zinc-500 text-center py-4">No active users found.</div>
                 ) : (
                   activeUsers.map((user) => (
-                    <div key={user.userId} className="bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 flex items-center justify-between hover:border-green-500/30 transition-colors group/row">
+                    <motion.div 
+                      key={user.userId} 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="bg-zinc-950/50 border border-zinc-800/80 rounded-xl p-4 flex items-center justify-between hover:border-green-500/30 transition-colors group/row"
+                    >
                       <div className="flex items-center gap-4">
                         <div className="w-10 h-10 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center">
                           <User className="w-5 h-5 text-zinc-500 group-hover/row:text-green-500 transition-colors" />
@@ -555,7 +695,7 @@ export default function App() {
                           <span className="text-zinc-400 font-medium">{formatDuration(user.joinedAt)}</span>
                         </div>
                       </div>
-                    </div>
+                    </motion.div>
                   ))
                 )}
               </div>
@@ -563,7 +703,7 @@ export default function App() {
           </div>
 
           {/* Right: Tall Square */}
-          <div className="lg:col-span-1 bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col h-full min-h-[320px] relative overflow-hidden group hover:border-green-500/30 transition-colors">
+          <div className="lg:col-span-1 bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col h-full min-h-[320px] relative overflow-hidden group hover:border-green-500/30 transition-all active:scale-[0.98]">
             {/* Subtle green glow */}
             <div className="absolute top-0 right-0 w-40 h-40 bg-green-500/5 rounded-full blur-3xl -mr-10 -mt-10 transition-opacity group-hover:bg-green-500/10 pointer-events-none"></div>
             
@@ -594,14 +734,14 @@ export default function App() {
             {activeSlot ? (
               <button 
                 onClick={() => setIsScriptModalOpen(true)}
-                className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-3.5 rounded-xl transition-all mt-auto shadow-[0_0_15px_rgba(34,197,94,0.3)]"
+                className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-3.5 rounded-xl transition-all active:scale-95 mt-auto shadow-[0_0_15px_rgba(34,197,94,0.3)]"
               >
                 Get script
               </button>
             ) : (
               <button 
                 onClick={() => setActiveTab('purchase')}
-                className="w-full bg-transparent hover:bg-green-500/10 text-green-500 border border-green-500/30 hover:border-green-500 font-bold py-3.5 rounded-xl transition-all mt-auto"
+                className="w-full bg-transparent hover:bg-green-500/10 text-green-500 border border-green-500/30 hover:border-green-500 font-bold py-3.5 rounded-xl transition-all active:scale-95 mt-auto"
               >
                 Buy Key
               </button>
@@ -609,12 +749,19 @@ export default function App() {
           </div>
 
         </div>
-      </main>
-      )}
+        </motion.main>
+        )}
 
-      {/* Slots Tab Content */}
-      {activeTab === 'slots' && (
-        <main className="max-w-7xl px-6 py-10">
+        {/* Slots Tab Content */}
+        {activeTab === 'slots' && (
+          <motion.main 
+            key="slots"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="max-w-7xl px-6 py-10 relative z-10"
+          >
           <h1 className="text-2xl font-semibold mb-8 text-zinc-300">
             Active Slots
           </h1>
@@ -624,7 +771,13 @@ export default function App() {
               <div className="text-zinc-500 text-center py-4">No active slots found.</div>
             ) : (
               activeSlots.map((slot, index) => (
-                <div key={index} className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col hover:border-green-500/30 transition-colors">
+                <motion.div 
+                  key={index} 
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: index * 0.05 }}
+                  className="bg-zinc-900/40 border border-zinc-800/80 rounded-2xl p-6 flex flex-col hover:border-green-500/30 transition-colors"
+                >
                   <div className="mb-6">
                     <h2 className="text-3xl font-bold text-white mb-2">{slot.plan}</h2>
                     <div className="text-green-500 font-bold tracking-wider text-lg">
@@ -645,16 +798,23 @@ export default function App() {
                       <span>{slot.expiresAt ? formatTimeLeft(new Date(slot.expiresAt).getTime()) : 'N/A'}</span>
                     </div>
                   </div>
-                </div>
+                </motion.div>
               ))
             )}
           </div>
-        </main>
-      )}
+        </motion.main>
+        )}
 
-      {/* Purchase Tab Content */}
-      {activeTab === 'purchase' && (
-        <main className="max-w-7xl px-6 py-10">
+        {/* Purchase Tab Content */}
+        {activeTab === 'purchase' && (
+          <motion.main 
+            key="purchase"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="max-w-7xl px-6 py-10 relative z-10"
+          >
           <div className="mb-8">
             <h1 className="text-2xl font-semibold mb-2 text-zinc-300">
               Buy A Plan
@@ -669,8 +829,10 @@ export default function App() {
             <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Ultra Plan */}
               <div 
-                onClick={() => setSelectedPlan('Ultra')}
-                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Ultra' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all relative group`}
+                onClick={() => {
+                  if (globalUltraCount < 2) setSelectedPlan('Ultra');
+                }}
+                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Ultra' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalUltraCount >= 2 ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
               >
                 <div className="absolute top-6 right-6 text-green-500 font-bold tracking-wider text-lg">
                   5/H
@@ -688,15 +850,20 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="mt-auto pt-6 border-t border-zinc-800/50">
+                <div className="mt-auto pt-6 border-t border-zinc-800/50 flex justify-between items-center">
                   <span className="text-zinc-500 text-sm font-bold uppercase tracking-wider">Minimum 1 hour</span>
+                  <span className={`text-sm font-bold ${globalUltraCount >= 2 ? 'text-red-500' : 'text-green-500'}`}>
+                    {globalUltraCount >= 2 ? 'SOLD OUT' : `${2 - globalUltraCount} left`}
+                  </span>
                 </div>
               </div>
 
               {/* Normal Plan */}
               <div 
-                onClick={() => setSelectedPlan('Normal')}
-                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Normal' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all relative group`}
+                onClick={() => {
+                  if (globalNormalCount < 3) setSelectedPlan('Normal');
+                }}
+                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Normal' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalNormalCount >= 3 ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
               >
                 <div className="absolute top-6 right-6 text-green-500 font-bold tracking-wider text-lg">
                   2/H
@@ -714,8 +881,11 @@ export default function App() {
                   </div>
                 </div>
                 
-                <div className="mt-auto pt-6 border-t border-zinc-800/50">
+                <div className="mt-auto pt-6 border-t border-zinc-800/50 flex justify-between items-center">
                   <span className="text-zinc-500 text-sm font-bold uppercase tracking-wider">Minimum 1 hour</span>
+                  <span className={`text-sm font-bold ${globalNormalCount >= 3 ? 'text-red-500' : 'text-green-500'}`}>
+                    {globalNormalCount >= 3 ? 'SOLD OUT' : `${3 - globalNormalCount} left`}
+                  </span>
                 </div>
               </div>
             </div>
@@ -762,29 +932,53 @@ export default function App() {
               <button 
                 disabled={!selectedPlan || isPurchasing || !purchasesEnabled}
                 onClick={handlePurchase}
-                className={`w-full mt-6 font-bold py-3.5 rounded-xl transition-all ${selectedPlan && !isPurchasing && purchasesEnabled ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'}`}
+                className={`w-full mt-6 font-bold py-3.5 rounded-xl transition-all active:scale-95 ${selectedPlan && !isPurchasing && purchasesEnabled ? 'bg-green-500 hover:bg-green-400 text-black shadow-[0_0_15px_rgba(34,197,94,0.3)]' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed active:scale-100'}`}
               >
                 {isPurchasing ? 'Processing...' : !purchasesEnabled ? 'Purchases Disabled' : 'Purchase'}
               </button>
             </div>
           </div>
-        </main>
-      )}
+        </motion.main>
+        )}
 
-      {/* Admin Tab Content */}
-      {activeTab === 'admin' && isAdmin && (
-        <AdminTab />
-      )}
+        {/* Admin Tab Content */}
+        {activeTab === 'admin' && isAdmin && (
+          <motion.div 
+            key="admin"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.2 }}
+            className="relative z-10"
+          >
+            <AdminTab 
+              purchasesEnabled={purchasesEnabled} 
+              setPurchasesEnabled={setPurchasesEnabled} 
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Steals Modal */}
-      {isStealsMenuOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+      <AnimatePresence>
+        {isStealsMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl"
+            >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-zinc-200">Recent Steals</h2>
               <button 
                 onClick={() => setIsStealsMenuOpen(false)} 
-                className="text-zinc-500 hover:text-white transition-colors p-1 rounded-md hover:bg-zinc-900"
+                className="text-zinc-500 hover:text-white transition-all active:scale-95 p-1 rounded-md hover:bg-zinc-900"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -795,19 +989,31 @@ export default function App() {
                 <span className="text-green-500 font-bold tracking-wider">2B/S</span>
               </div>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Top Up Modal */}
-      {isTopUpMenuOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+      <AnimatePresence>
+        {isTopUpMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl"
+            >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-zinc-200">Top UP</h2>
               <button 
                 onClick={() => setIsTopUpMenuOpen(false)} 
-                className="text-zinc-500 hover:text-white transition-colors p-1 rounded-md hover:bg-zinc-900"
+                className="text-zinc-500 hover:text-white transition-all active:scale-95 p-1 rounded-md hover:bg-zinc-900"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -824,31 +1030,40 @@ export default function App() {
                 />
               </div>
               <button 
-                disabled={!purchasesEnabled}
+                disabled={true}
                 onClick={() => {
-                  window.open('https://app.paymento.io/payment-link/ddc0f06e38fe42ec86d06b84d83b080e', '_blank');
-                  setDepositsCount(prev => prev + 1);
-                  logActivity('payment', { item: 'Top Up', amount: topUpAmount });
-                  setIsTopUpMenuOpen(false);
+                  // Top up disabled
                 }}
-                className={`w-full ${purchasesEnabled ? 'bg-green-500 hover:bg-green-400 text-black' : 'bg-zinc-800 text-zinc-500 cursor-not-allowed'} font-bold py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)] mt-2`}
+                className={`w-full bg-zinc-800 text-zinc-500 cursor-not-allowed font-bold py-3.5 rounded-xl transition-all mt-2`}
               >
-                {purchasesEnabled ? 'Top Up' : 'Purchases Disabled'}
+                Top Ups Disabled
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Redeem Key Modal */}
-      {isRedeemMenuOpen && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl">
+      <AnimatePresence>
+        {isRedeemMenuOpen && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl"
+            >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-zinc-200">Redeem key</h2>
               <button 
                 onClick={() => setIsRedeemMenuOpen(false)} 
-                className="text-zinc-500 hover:text-white transition-colors p-1 rounded-md hover:bg-zinc-900"
+                className="text-zinc-500 hover:text-white transition-all active:scale-95 p-1 rounded-md hover:bg-zinc-900"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -882,23 +1097,35 @@ export default function App() {
                   setIsRedeemMenuOpen(false);
                   setRedeemKey('');
                 }}
-                className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(34,197,94,0.3)] mt-2"
+                className="w-full bg-green-500 hover:bg-green-400 text-black font-bold py-3.5 rounded-xl transition-all active:scale-95 shadow-[0_0_15px_rgba(34,197,94,0.3)] mt-2"
               >
                 Redeem
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </motion.div>
+        </motion.div>
+        )}
+      </AnimatePresence>
       {/* Script Modal */}
+      <AnimatePresence>
       {isScriptModalOpen && activeSlot && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl">
+        <motion.div 
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/80 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        >
+          <motion.div 
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            exit={{ scale: 0.95, opacity: 0 }}
+            className="bg-zinc-950 border border-zinc-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl"
+          >
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-bold text-green-500">Your Script</h2>
               <button 
                 onClick={() => setIsScriptModalOpen(false)} 
-                className="text-zinc-500 hover:text-white transition-colors p-1 rounded-md hover:bg-zinc-900"
+                className="text-zinc-500 hover:text-white transition-all active:scale-95 p-1 rounded-md hover:bg-zinc-900"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -916,14 +1143,15 @@ loadstring(game:HttpGet("https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-
                   navigator.clipboard.writeText(`getgenv().SCRIPT_KEY = "${activeSlot.key}"\nloadstring(game:HttpGet("https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1"))()`);
                   alert("Script copied to clipboard!");
                 }}
-                className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl transition-all"
+                className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95"
               >
                 Copy Script
               </button>
             </div>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

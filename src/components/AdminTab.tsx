@@ -15,7 +15,12 @@ interface LoginLog {
   timestamp: number;
 }
 
-export default function AdminTab() {
+interface AdminTabProps {
+  purchasesEnabled: boolean;
+  setPurchasesEnabled: (enabled: boolean) => void;
+}
+
+export default function AdminTab({ purchasesEnabled, setPurchasesEnabled }: AdminTabProps) {
   const [users, setUsers] = useState<User[]>([]);
   const [loginLogs, setLoginLogs] = useState<LoginLog[]>([]);
   const [balanceChange, setBalanceChange] = useState<{ [key: string]: string }>({});
@@ -57,6 +62,32 @@ export default function AdminTab() {
   return (
     <div className="p-6 space-y-8">
       <section>
+        <h2 className="text-xl font-bold text-white mb-4">Purchase Settings</h2>
+        <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-6 max-w-sm">
+          <button
+            onClick={async () => {
+              const newStatus = purchasesEnabled ? 'disabled' : 'enabled';
+              try {
+                await fetch('https://purchase-system-production.up.railway.app/set', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ purchases: newStatus })
+                });
+                setPurchasesEnabled(!purchasesEnabled);
+                alert(`Purchases ${newStatus}!`);
+              } catch (error) {
+                console.error("Failed to update purchase status", error);
+                alert("Failed to update purchase status");
+              }
+            }}
+            className={`w-full font-bold py-3 rounded-xl transition-all active:scale-95 ${purchasesEnabled ? 'bg-red-500 hover:bg-red-400' : 'bg-green-500 hover:bg-green-400'} text-white`}
+          >
+            {purchasesEnabled ? 'Disable Purchases' : 'Enable Purchases'}
+          </button>
+        </div>
+      </section>
+
+      <section>
         <h2 className="text-xl font-bold text-white mb-4">Login Logs</h2>
         <div className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-4 max-h-64 overflow-y-auto">
           {loginLogs.map(log => (
@@ -84,8 +115,8 @@ export default function AdminTab() {
                   className="bg-zinc-950 border border-zinc-800 rounded-lg px-2 py-1 text-white w-20"
                   placeholder="Amount"
                 />
-                <button onClick={() => handleBalanceChange(user.id, parseFloat(balanceChange[user.id] || '0'), 'add')} className="bg-green-600 text-white px-3 py-1 rounded-lg text-sm font-bold">+</button>
-                <button onClick={() => handleBalanceChange(user.id, parseFloat(balanceChange[user.id] || '0'), 'remove')} className="bg-red-600 text-white px-3 py-1 rounded-lg text-sm font-bold">-</button>
+                <button onClick={() => handleBalanceChange(user.id, parseFloat(balanceChange[user.id] || '0'), 'add')} className="bg-green-600 hover:bg-green-500 transition-all active:scale-95 text-white px-3 py-1 rounded-lg text-sm font-bold">+</button>
+                <button onClick={() => handleBalanceChange(user.id, parseFloat(balanceChange[user.id] || '0'), 'remove')} className="bg-red-600 hover:bg-red-500 transition-all active:scale-95 text-white px-3 py-1 rounded-lg text-sm font-bold">-</button>
               </div>
             </div>
           ))}

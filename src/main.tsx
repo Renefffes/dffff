@@ -24,7 +24,7 @@ createRoot(document.getElementById('root')!).render(
           </p>
           <button 
             onClick={() => window.open(window.location.href, '_blank')}
-            className="w-full bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold py-3.5 rounded-xl transition-all shadow-[0_0_15px_rgba(88,101,242,0.3)]"
+            className="w-full bg-[#5865F2] hover:bg-[#4752C4] text-white font-bold py-3.5 rounded-xl transition-all active:scale-95 shadow-[0_0_15px_rgba(88,101,242,0.3)]"
           >
             Open in New Tab
           </button>
