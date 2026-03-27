@@ -81,6 +81,23 @@ export default function AdminTab({ activeSlotsCount, activeUsersCount, depositsC
     };
   }, []);
 
+  const handleClearLoginLogs = async () => {
+    if (!window.confirm("Are you sure you want to clear all login logs? This action cannot be undone.")) return;
+    
+    try {
+      const batch = writeBatch(db);
+      loginLogs.forEach(log => {
+        const logDocRef = doc(db, 'loginLogs', log.id);
+        batch.delete(logDocRef);
+      });
+      await batch.commit();
+      alert("Login logs cleared successfully.");
+    } catch (error) {
+      console.error("Error clearing login logs:", error);
+      alert("Failed to clear login logs.");
+    }
+  };
+
   const handleRefund = async (log: PurchaseLog) => {
     if (!window.confirm(`Are you sure you want to refund $${log.amount.toFixed(2)} to ${log.username}?`)) return;
     
@@ -559,48 +576,63 @@ export default function AdminTab({ activeSlotsCount, activeUsersCount, depositsC
           </div>
         </section>
       ) : (
-        <section>
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-xl font-bold text-white">Purchase History</h2>
-            <div className="text-zinc-500 text-sm">{purchaseLogs.length} Total Purchases</div>
-          </div>
-          
-          <div className="grid gap-4">
-            {purchaseLogs.map(log => (
-              <div key={log.id} className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex items-center justify-between">
-                <div>
-                  <div className="flex items-center gap-3 mb-1">
-                    <div className="text-white font-bold">{log.username}</div>
-                    <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter ${log.plan === 'Ultra' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
-                      {log.plan}
-                    </div>
-                    {log.refunded && (
-                      <div className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter bg-red-500/20 text-red-400 border border-red-500/30">
-                        Refunded
+        <div className="space-y-8">
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-white">Login Logs</h2>
+              <button 
+                onClick={handleClearLoginLogs}
+                className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 px-4 py-2 rounded-lg text-sm font-bold transition-all active:scale-95"
+              >
+                Clear Login Logs
+              </button>
+            </div>
+            <div className="text-zinc-500 text-sm mb-4">{loginLogs.length} Total Logins</div>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-xl font-bold text-white">Purchase History</h2>
+              <div className="text-zinc-500 text-sm">{purchaseLogs.length} Total Purchases</div>
+            </div>
+            
+            <div className="grid gap-4">
+              {purchaseLogs.map(log => (
+                <div key={log.id} className="bg-zinc-900/40 border border-zinc-800 rounded-xl p-5 flex items-center justify-between">
+                  <div>
+                    <div className="flex items-center gap-3 mb-1">
+                      <div className="text-white font-bold">{log.username}</div>
+                      <div className={`text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter ${log.plan === 'Ultra' ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30' : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'}`}>
+                        {log.plan}
                       </div>
-                    )}
+                      {log.refunded && (
+                        <div className="text-[10px] font-bold px-1.5 py-0.5 rounded uppercase tracking-tighter bg-red-500/20 text-red-400 border border-red-500/30">
+                          Refunded
+                        </div>
+                      )}
+                    </div>
+                    <div className="text-zinc-500 text-xs">
+                      {new Date(log.timestamp).toLocaleString()} • <span className="text-green-500 font-bold">${log.amount.toFixed(2)}</span>
+                    </div>
                   </div>
-                  <div className="text-zinc-500 text-xs">
-                    {new Date(log.timestamp).toLocaleString()} • <span className="text-green-500 font-bold">${log.amount.toFixed(2)}</span>
-                  </div>
+                  
+                  {!log.refunded && (
+                    <button 
+                      onClick={() => handleRefund(log)}
+                      className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all active:scale-95"
+                    >
+                      <Undo2 className="w-4 h-4" />
+                      Refund
+                    </button>
+                  )}
                 </div>
-                
-                {!log.refunded && (
-                  <button 
-                    onClick={() => handleRefund(log)}
-                    className="bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 text-red-500 px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition-all active:scale-95"
-                  >
-                    <Undo2 className="w-4 h-4" />
-                    Refund
-                  </button>
-                )}
-              </div>
-            ))}
-            {purchaseLogs.length === 0 && (
-              <div className="text-center text-zinc-500 py-8">No purchase history found.</div>
-            )}
-          </div>
-        </section>
+              ))}
+              {purchaseLogs.length === 0 && (
+                <div className="text-center text-zinc-500 py-8">No purchase history found.</div>
+              )}
+            </div>
+          </section>
+        </div>
       )}
     </div>
   );
