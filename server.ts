@@ -7,7 +7,36 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  app.use(express.json());
+
   // API routes FIRST
+  app.post("/api/luarmor/users", async (req, res) => {
+    try {
+      const response = await fetch('http://144.172.94.54:3001/proxy-luarmor', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-proxy-secret': 'syntax2020'
+        },
+        body: JSON.stringify(req.body)
+      });
+      
+      const responseText = await response.text();
+      console.log("Luarmor API response status:", response.status);
+      console.log("Luarmor API response text:", responseText);
+
+      if (!response.ok) {
+        throw new Error(`Luarmor API returned ${response.status}: ${responseText}`);
+      }
+
+      const data = JSON.parse(responseText);
+      res.json(data);
+    } catch (error) {
+      console.error("Luarmor proxy error:", error);
+      res.status(500).json({ error: error instanceof Error ? error.message : "Failed to communicate with Proxy" });
+    }
+  });
+
   app.get("/api/auth/url", (req, res) => {
     const redirectUri = `${req.protocol}://${req.get('host')}/auth/callback`;
     const clientId = process.env.DISCORD_CLIENT_ID || '1484912235389128734';

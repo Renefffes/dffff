@@ -227,28 +227,25 @@ export default function AdminTab({ activeSlotsCount, activeUsersCount, depositsC
         const payloadString = JSON.stringify(payload);
         const hmacHex = await generateHMAC(payloadString, '123');
 
-        const response = await fetch('https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1', {
+        // New Luarmor API integration via proxy
+        const luarmorResponse = await fetch('/api/luarmor/users', {
           method: 'POST',
           headers: {
-            'Content-Type': 'application/json',
-            '123': hmacHex
+            'Content-Type': 'application/json'
           },
-          body: payloadString
+          body: JSON.stringify({
+            "auth_expire": 3600
+          })
         });
 
-        let keyData = "JW-COMP-KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-        if (response.ok) {
-          try {
-            const text = await response.text();
-            try {
-              const data = JSON.parse(text);
-              keyData = data.key || data.code || data.premium_key || JSON.stringify(data);
-            } catch (e) {
-              keyData = text;
-            }
-          } catch (e) {
-            console.error("Failed to parse response for user", user.id, e);
-          }
+        const luarmorData = await luarmorResponse.json();
+        
+        let keyData = "KEY-ERROR";
+        if (luarmorData.success) {
+          keyData = luarmorData.user_key;
+        } else {
+          console.error("Luarmor API failed:", luarmorData);
+          throw new Error("Failed to generate key from Luarmor");
         }
 
         const userRef = doc(db, 'users', user.id);
@@ -294,28 +291,26 @@ export default function AdminTab({ activeSlotsCount, activeUsersCount, depositsC
       const payloadString = JSON.stringify(payload);
       const hmacHex = await generateHMAC(payloadString, '123');
 
-      const response = await fetch('https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1', {
+      // New Luarmor API integration
+      const luarmorResponse = await fetch('https://api.luarmor.net/v3/projects/3fca2201fb8c5f2ff67db341ac5a0e90/users', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          '123': hmacHex
+          'Authorization': 'd0b019bcce6df8b2762156c41a3288b1e4a8907a92d1cf981101',
+          'Content-Type': 'application/json'
         },
-        body: payloadString
+        body: JSON.stringify({
+          "auth_expire": 3600
+        })
       });
 
-      let keyData = "JW-COMP-KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-      if (response.ok) {
-        try {
-          const text = await response.text();
-          try {
-            const data = JSON.parse(text);
-            keyData = data.key || data.code || data.premium_key || JSON.stringify(data);
-          } catch (e) {
-            keyData = text;
-          }
-        } catch (e) {
-          console.error("Failed to parse response for user", user.id, e);
-        }
+      const luarmorData = await luarmorResponse.json();
+      
+      let keyData = "KEY-ERROR";
+      if (luarmorData.success) {
+        keyData = luarmorData.user_key;
+      } else {
+        console.error("Luarmor API failed:", luarmorData);
+        throw new Error("Failed to generate key from Luarmor");
       }
 
       await updateDoc(doc(db, 'users', user.id), {

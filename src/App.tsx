@@ -317,17 +317,17 @@ export default function App() {
       return;
     }
     
-    if (selectedPlan === 'Ultra' && globalUltraCount >= 2) {
-      alert("Ultra slots are currently sold out! Only 2 people can have them at a time.");
+    if (activeSlot) {
+      alert("You already have an active slot. Please wait for it to expire before purchasing a new one.");
       return;
     }
     
-    if (selectedPlan === 'Normal' && globalNormalCount >= 3) {
-      alert("Normal slots are currently sold out! Only 3 people can have them at a time.");
+    if (selectedPlan === 'Normal' && globalNormalCount >= 4) {
+      alert("Normal slots are currently sold out! Only 4 people can have them at a time.");
       return;
     }
 
-    const totalPrice = selectedPlan ? (selectedPlan === 'Ultra' ? 3 : 2) * purchaseHours : 0;
+    const totalPrice = selectedPlan ? 2 * purchaseHours : 0;
     if (balance < totalPrice) {
       alert("Insufficient balance! Please top up.");
       return;
@@ -349,8 +349,8 @@ export default function App() {
       const payload = {
         item: {
           product: {
-            name: `${selectedPlan || 'Normal'} Key`,
-            price: selectedPlan === 'Ultra' ? 3.00 : 2.00
+            name: `Normal Key`,
+            price: 2.00
           },
           quantity: 1
         },
@@ -380,51 +380,30 @@ export default function App() {
         .map(b => b.toString(16).padStart(2, '0'))
         .join('');
 
-      const response = await fetch('https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1', {
+      // New Luarmor API integration via proxy
+      const luarmorResponse = await fetch('/api/luarmor/users', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json',
-          '123': hmacHex
-        },
-        body: payloadString
-      });
-
-      // Send user data to the new API
-      await fetch('https://gfgfgf-production.up.railway.app/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
+          'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          discordId: user?.id || "test_user_123",
-          username: user?.username || user?.firstName || 'User',
-          plan: selectedPlan || 'Normal',
-          timeAmount: purchaseHours * 60 // convert hours to minutes
+          "auth_expire": 3600
         })
       });
 
-      let keyData = "JW-PREMIUM-KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-      if (response.ok) {
-        try {
-          const text = await response.text();
-          try {
-            const data = JSON.parse(text);
-            keyData = data.key || data.code || data.premium_key || JSON.stringify(data);
-          } catch (e) {
-            keyData = text; // If it's plain text
-          }
-        } catch (e) {
-          console.error("Failed to parse response", e);
-        }
+      const luarmorData = await luarmorResponse.json();
+      
+      let keyData = "KEY-ERROR";
+      if (luarmorData.success) {
+        keyData = luarmorData.user_key;
       } else {
-        const errText = await response.text();
-        console.error("Webhook failed:", response.status, errText);
-        alert("Webhook failed: " + errText);
+        console.error("Luarmor API failed:", luarmorData);
+        throw new Error("Failed to generate key from Luarmor");
       }
       
       await updateDoc(userDocRef, {
         activeSlot: {
-          plan: selectedPlan || 'Normal',
+          plan: 'Normal',
           expiresAt: Date.now() + purchaseHours * 3600 * 1000,
           key: keyData
         }
@@ -433,7 +412,7 @@ export default function App() {
         await addDoc(collection(db, 'purchaseLogs'), {
           uid: user.id,
           username: user.username || user.firstName || 'User',
-          plan: selectedPlan || 'Normal',
+          plan: 'Normal',
           amount: totalPrice,
           timestamp: Date.now(),
           refunded: false
@@ -441,36 +420,12 @@ export default function App() {
       } catch (e) {
         console.error("Failed to save purchase log (success path):", e);
       }
-      logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
-      alert("Slot bought!");
+      logActivity('purchase', { item: 'Normal', amount: totalPrice });
+      alert("Slot bought! Your key is: " + keyData);
       setActiveTab('dashboard');
     } catch (error) {
       console.error("Purchase failed", error);
-      // Fallback key if webhook fails (e.g. CORS)
-      const fallbackKey = "JW-PREMIUM-KEY-" + Math.random().toString(36).substring(2, 10).toUpperCase();
-      const userDocRef = doc(db, 'users', user.id);
-      await updateDoc(userDocRef, {
-        activeSlot: {
-          plan: selectedPlan || 'Normal',
-          expiresAt: Date.now() + purchaseHours * 3600 * 1000,
-          key: fallbackKey
-        }
-      });
-      try {
-        await addDoc(collection(db, 'purchaseLogs'), {
-          uid: user.id,
-          username: user.username || user.firstName || 'User',
-          plan: selectedPlan || 'Normal',
-          amount: totalPrice,
-          timestamp: Date.now(),
-          refunded: false
-        });
-      } catch (e) {
-        console.error("Failed to save purchase log (error path):", e);
-      }
-      logActivity('purchase', { item: selectedPlan || 'Normal', amount: totalPrice });
-      alert("Slot bought!");
-      setActiveTab('dashboard');
+      alert("Purchase failed: " + error);
     } finally {
       setIsPurchasing(false);
     }
@@ -883,42 +838,7 @@ export default function App() {
           
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* Left: Plans */}
-            <div className="lg:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Ultra Plan */}
-              <div 
-                onClick={() => {
-                  if (isPaused) {
-                    alert("Slots are currently paused. Purchases are disabled.");
-                    return;
-                  }
-                  if (globalUltraCount < 2) setSelectedPlan('Ultra');
-                }}
-                className={`cursor-pointer bg-zinc-900/40 border ${selectedPlan === 'Ultra' ? 'border-green-500 shadow-[0_0_15px_rgba(34,197,94,0.15)]' : 'border-zinc-800/80'} rounded-2xl p-6 flex flex-col hover:border-green-500/50 transition-all active:scale-[0.98] relative group ${globalUltraCount >= 2 || isPaused ? 'opacity-50 cursor-not-allowed active:scale-100' : ''}`}
-              >
-                <div className="absolute top-6 right-6 text-green-500 font-bold tracking-wider text-lg">
-                  3/H
-                </div>
-                <h3 className="text-3xl font-bold text-white mb-6">Ultra</h3>
-                
-                <div className="flex flex-col gap-3 mb-10">
-                  <div className="flex items-center gap-2 text-zinc-300 font-medium">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                    0 delay
-                  </div>
-                  <div className="flex items-center gap-2 text-zinc-300 font-medium">
-                    <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
-                    No Max
-                  </div>
-                </div>
-                
-                <div className="mt-auto pt-6 border-t border-zinc-800/50 flex justify-between items-center">
-                  <span className="text-zinc-500 text-sm font-bold uppercase tracking-wider">Minimum 1 hour</span>
-                  <span className={`text-sm font-bold ${globalUltraCount >= 2 ? 'text-red-500' : 'text-green-500'}`}>
-                    {globalUltraCount >= 2 ? 'SOLD OUT' : `${2 - globalUltraCount} left`}
-                  </span>
-                </div>
-              </div>
-
+            <div className="lg:col-span-2 grid grid-cols-1 gap-6">
               {/* Normal Plan */}
               <div 
                 onClick={() => {
@@ -938,18 +858,18 @@ export default function App() {
                 <div className="flex flex-col gap-3 mb-10">
                   <div className="flex items-center gap-2 text-zinc-300 font-medium">
                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 group-hover:bg-green-500 transition-colors"></div>
-                    1B Max
+                    No Max
                   </div>
                   <div className="flex items-center gap-2 text-zinc-300 font-medium">
                     <div className="w-1.5 h-1.5 rounded-full bg-zinc-600 group-hover:bg-green-500 transition-colors"></div>
-                    1 s delay
+                    No Delay
                   </div>
                 </div>
                 
                 <div className="mt-auto pt-6 border-t border-zinc-800/50 flex justify-between items-center">
                   <span className="text-zinc-500 text-sm font-bold uppercase tracking-wider">Minimum 1 hour</span>
-                  <span className={`text-sm font-bold ${globalNormalCount >= 3 ? 'text-red-500' : 'text-green-500'}`}>
-                    {globalNormalCount >= 3 ? 'SOLD OUT' : `${3 - globalNormalCount} left`}
+                  <span className={`text-sm font-bold ${globalNormalCount >= 4 ? 'text-red-500' : 'text-green-500'}`}>
+                    {globalNormalCount >= 4 ? 'SOLD OUT' : `${4 - globalNormalCount} left`}
                   </span>
                 </div>
               </div>
@@ -1202,12 +1122,13 @@ export default function App() {
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl p-4 relative group">
                 <pre className="text-green-400 font-mono text-sm overflow-x-auto whitespace-pre-wrap break-all">
 {`getgenv().SCRIPT_KEY = "${activeSlot.key}"
-loadstring(game:HttpGet("https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1"))()`}
+loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/99a6733c9b5a9995a37657d46ceacf8e.lua"))()`}
                 </pre>
               </div>
               <button 
                 onClick={() => {
-                  navigator.clipboard.writeText(`getgenv().SCRIPT_KEY = "${activeSlot.key}"\nloadstring(game:HttpGet("https://api.jnkie.com/api/v1/webhooks/execute/41e78d35-68f3-45c4-8f82-e4902fe191c1"))()`);
+                  navigator.clipboard.writeText(`getgenv().SCRIPT_KEY = "${activeSlot.key}"
+loadstring(game:HttpGet("https://api.luarmor.net/files/v4/loaders/99a6733c9b5a9995a37657d46ceacf8e.lua"))()`);
                   alert("Script copied to clipboard!");
                 }}
                 className="w-full bg-zinc-800 hover:bg-zinc-700 text-white font-bold py-3 rounded-xl transition-all active:scale-95"
