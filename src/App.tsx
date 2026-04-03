@@ -462,7 +462,7 @@ export default function App() {
         {/* Logo */}
         <div className="w-1/3 flex justify-start items-center gap-3">
           <div className="text-xl font-bold tracking-wider text-green-500">
-            Syntax Notifier
+            JW X SYNTAX
           </div>
           <div className="bg-zinc-900/60 border border-zinc-800 px-2 py-1 rounded-lg flex items-center gap-1.5">
             <div className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
